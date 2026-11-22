@@ -7,10 +7,10 @@ export type ViewName = "iso" | "top" | "front" | "side";
 
 /** Toolpath colours. Red / yellow / green are reserved for verification status. */
 export const PATH_COLORS = {
-  rapid: "#8b95a5",
-  mill: "#22d3ee",
-  hole: "#e879f9",
-  reference: "#818cf8",
+  rapid: "#7c8794",
+  mill: "#0284c7",
+  hole: "#c026d3",
+  reference: "#4f46e5",
 } as const;
 
 const VIEW_DIRS: Record<ViewName, THREE.Vector3> = {
@@ -91,7 +91,7 @@ export class SceneView {
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x0b0e13);
+    this.renderer.setClearColor(0xe6ebf0);
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100000);
@@ -102,7 +102,7 @@ export class SceneView {
     this.controls.dampingFactor = 0.12;
     this.controls.screenSpacePanning = true;
 
-    this.scene.add(new THREE.HemisphereLight(0xdfe7f2, 0x1a1f26, 1.1));
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a95a3, 1.2));
     const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(300, -400, 800);
     this.scene.add(key);
@@ -179,16 +179,16 @@ export class SceneView {
     const mesh = new THREE.Mesh(
       geo,
       new THREE.MeshStandardMaterial({
-        color: 0x9aa3ad,
-        metalness: 0.55,
-        roughness: 0.45,
+        color: 0x9db8d3,
+        metalness: 0.1,
+        roughness: 0.6,
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.35,
         depthWrite: false,
       }),
     );
     mesh.position.copy(center);
-    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xc7ced6 }));
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x334155 }));
     edges.position.copy(center);
     this.stockGroup.add(mesh, edges);
 
@@ -198,11 +198,11 @@ export class SceneView {
     const tableTop = b.min[2];
     const table = new THREE.Mesh(
       new THREE.BoxGeometry(tw, td, 40),
-      new THREE.MeshStandardMaterial({ color: 0x2b3138, metalness: 0.6, roughness: 0.55 }),
+      new THREE.MeshStandardMaterial({ color: 0xd3d9df, metalness: 0.2, roughness: 0.7 }),
     );
     table.position.set(center.x, center.y, tableTop - 20);
     this.tableGroup.add(table);
-    const slotMat = new THREE.MeshStandardMaterial({ color: 0x15191e, roughness: 0.9 });
+    const slotMat = new THREE.MeshStandardMaterial({ color: 0xa3adb8, roughness: 0.9 });
     const slots = 5;
     for (let i = 0; i < slots; i++) {
       const y = center.y - td / 2 + ((i + 0.5) * td) / slots;
@@ -266,7 +266,7 @@ export class SceneView {
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     const future = new THREE.LineSegments(
       geo,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false }),
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.35, depthWrite: false }),
     );
     // Executed path shares the vertex buffers; only its draw range differs.
     const doneGeo = new THREE.BufferGeometry();
@@ -314,8 +314,8 @@ export class SceneView {
       m.position.z = z0 + len / 2;
       return m;
     };
-    const steel = new THREE.MeshStandardMaterial({ color: 0xd5dbe2, metalness: 0.9, roughness: 0.25 });
-    const holderMat = new THREE.MeshStandardMaterial({ color: 0x5b6573, metalness: 0.7, roughness: 0.35 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0xc9d0d8, metalness: 0.35, roughness: 0.35 });
+    const holderMat = new THREE.MeshStandardMaterial({ color: 0x6b7684, metalness: 0.3, roughness: 0.45 });
     const spindleMat = new THREE.MeshStandardMaterial({
       color: 0x3a4250,
       metalness: 0.5,
