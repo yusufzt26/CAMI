@@ -10,7 +10,7 @@ from app.main import app  # noqa: E402
 
 def test_upload_and_interpret():
     with TestClient(app) as client:
-        body = b"G90 G17 G21 G54\nT1 M06\nS1000 M03\nG00 G43 H1 Z5.\nG01 X10. F100.\nM30\n"
+        body = b"(T1 D10 FLAT END MILL)\nG90 G17 G21 G54\nT1 M06\nS1000 M03\nG00 G43 H1 Z5.\nG01 X10. F100.\nM30\n"
         r = client.post("/api/programs", files={"file": ("part.NC", body, "text/plain")})
         assert r.status_code == 201, r.text
         pid = r.json()["id"]

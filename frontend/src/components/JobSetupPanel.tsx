@@ -67,7 +67,7 @@ export function JobSetupPanel({ stock, onStock, setup, onSetup, dirty, canApply,
           <Row label="Stock allowance" hint="Extra material on sides and top">
             <NumberField value={stock.allowance} min={0} step={0.1} suffix="mm" onChange={(v) => onStock({ ...stock, allowance: v })} />
           </Row>
-          <p className="note">STEP/STL workpiece import and real material removal come in Phase 2–3. The stock is shown as an envelope for now.</p>
+          <p className="note">Stock changes are used after "Apply". STEP/STL workpiece import comes in Phase 3.</p>
         </Section>
 
         <Section title="Work offsets" defaultOpen={false}>
@@ -141,6 +141,12 @@ export function JobSetupPanel({ stock, onStock, setup, onSetup, dirty, canApply,
             <select className="select" value={setup.block_delete_switch ? "on" : "off"} onChange={(e) => upd({ block_delete_switch: e.target.value === "on" })}>
               <option value="off">OFF (run '/' blocks)</option>
               <option value="on">ON (skip '/' blocks)</option>
+            </select>
+          </Row>
+          <Row label="Cutter comp D value" hint="What the D register holds when the program uses G41/G42">
+            <select className="select" value={setup.cutter_comp_mode} onChange={(e) => upd({ cutter_comp_mode: e.target.value as InterpreterSetup["cutter_comp_mode"] })}>
+              <option value="tool_radius">Tool radius (part contour)</option>
+              <option value="zero">Wear only (CAM centre path)</option>
             </select>
           </Row>
           <Row label="Rapid traverse">

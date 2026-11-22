@@ -28,6 +28,10 @@ class InterpreterSettings:
     # FANUC rapids are non-interpolated ("dog-leg") unless parameter 1401#1 is set.
     rapid_mode: Literal["linear", "dogleg"] = "linear"
     block_delete_switch: bool = False  # True = blocks starting with '/' are skipped
+    # G41/G42: "tool_radius" = D register holds the radius of the tool with the same number;
+    # "zero" = D holds wear only (CAM already output the cutter-centre path).
+    cutter_comp_mode: Literal["tool_radius", "zero"] = "tool_radius"
+    comp_radii: dict[int, float] = field(default_factory=dict)  # D number -> radius (mm)
     arc_radius_tolerance: float = 0.02  # mm; start/end radius mismatch that raises an alarm
     chord_tolerance: float = 0.005  # mm; arc tessellation accuracy
 

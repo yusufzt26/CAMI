@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Timeline } from "../sim/timeline";
 import type { InterpretResponse } from "../types";
-import { PATH_COLORS, SceneView, type ViewName } from "../viewer/SceneView";
+import { PATH_COLORS, SceneView, type Layer, type ViewName } from "../viewer/SceneView";
 import { fmtNum } from "./format";
 
 type State = ReturnType<Timeline["stateAt"]>;
@@ -17,7 +17,14 @@ interface Props {
   state: State;
   onView: (v: ViewName) => void;
   onZoom: (factor: number) => void;
+  onLayer: (layer: Layer, visible: boolean) => void;
 }
+
+const LAYERS: { key: Layer; label: string }[] = [
+  { key: "stock", label: "Stock" },
+  { key: "path", label: "Toolpath" },
+  { key: "tool", label: "Tool" },
+];
 
 const VIEWS: { key: ViewName; label: string; title: string }[] = [
   { key: "iso", label: "ISO", title: "Isometric view" },
@@ -35,9 +42,10 @@ const KIND_LABEL: Record<string, string> = {
   stop: "STOP",
 };
 
-export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismissError, result, state, onView, onZoom }: Props) {
+export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismissError, result, state, onView, onZoom, onLayer }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState(false);
+  const [layers, setLayers] = useState<Record<Layer, boolean>>({ stock: true, path: true, tool: true });
 
   useEffect(() => {
     if (!host.current) return;
@@ -123,6 +131,24 @@ export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismiss
             {op && <span className="mode-chip op">{op}</span>}
             <span className="dro-line">N-line {m?.line}</span>
           </div>
+        </div>
+      )}
+
+      {hasProgram && (
+        <div className="layers">
+          {LAYERS.map((l) => (
+            <label key={l.key} className={layers[l.key] ? "on" : ""}>
+              <input
+                type="checkbox"
+                checked={layers[l.key]}
+                onChange={(e) => {
+                  setLayers((v) => ({ ...v, [l.key]: e.target.checked }));
+                  onLayer(l.key, e.target.checked);
+                }}
+              />
+              {l.label}
+            </label>
+          ))}
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import type { InterpretResponse, InterpreterSetup, ProgramMeta } from "./types";
+import type { InterpretResponse, InterpreterSetup, ProgramMeta, StockSetup, ToolOverride } from "./types";
 
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -24,12 +24,24 @@ export async function listPrograms(): Promise<ProgramMeta[]> {
   return handle(await fetch("/api/programs"));
 }
 
-export async function interpretProgram(id: number, setup: InterpreterSetup): Promise<InterpretResponse> {
+export interface JobSetup {
+  interpreter: InterpreterSetup;
+  stock: StockSetup;
+  tools: Record<string, ToolOverride>;
+}
+
+export async function interpretProgram(id: number, job: JobSetup): Promise<InterpretResponse> {
+  const { stock } = job;
+  const body = {
+    ...job.interpreter,
+    stock: { size: stock.size, origin: stock.origin, top_z: stock.topZ, allowance: stock.allowance, material: stock.material },
+    tools: job.tools,
+  };
   return handle(
     await fetch(`/api/programs/${id}/interpret`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(setup),
+      body: JSON.stringify(body),
     }),
   );
 }

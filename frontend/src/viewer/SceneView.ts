@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { StockPlayback } from "../sim/stockPlayback";
 import type { Timeline } from "../sim/timeline";
-import type { Move, StockSetup, Vec3 } from "../types";
+import { ToolShape } from "../sim/zmap";
+import type { Move, StockGrid, StockSetup, ToolInfo, Vec3 } from "../types";
+import { StockMesh } from "./StockMesh";
+
+export type Layer = "path" | "stock" | "tool";
 
 export type ViewName = "iso" | "top" | "front" | "side";
 
@@ -83,8 +88,12 @@ export class SceneView {
   private livePath: THREE.Line;
   private moveVertexStart: Int32Array = new Int32Array(0);
   private timeline: Timeline | null = null;
-  private toolDiameters: Record<string, number> = {};
+  private tools = new Map<string, ToolInfo>();
   private currentToolKey = "";
+  private stockPlayback: StockPlayback | null = null;
+  private stockMesh: StockMesh | null = null;
+  private envelope: THREE.Mesh | null = null;
+  private materialGroup = new THREE.Group();
   private stockBounds: { min: Vec3; max: Vec3 } | null = null;
   private pathBounds: THREE.Box3 | null = null;
 
@@ -110,7 +119,7 @@ export class SceneView {
     fill.position.set(-500, 300, 200);
     this.scene.add(fill);
 
-    this.scene.add(this.tableGroup, this.stockGroup, this.pathGroup, this.markerGroup, this.toolGroup);
+    this.scene.add(this.tableGroup, this.stockGroup, this.materialGroup, this.pathGroup, this.markerGroup, this.toolGroup);
     this.scene.add(this.makeAxes(30));
 
     this.livePath = new THREE.Line(
@@ -120,7 +129,7 @@ export class SceneView {
     this.livePath.frustumCulled = false;
     this.pathGroup.add(this.livePath);
 
-    this.buildTool(10);
+    this.buildTool(null);
 
     this.resizeObs = new ResizeObserver(() => this.resize());
     this.resizeObs.observe(container);
@@ -190,6 +199,8 @@ export class SceneView {
     mesh.position.copy(center);
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x334155 }));
     edges.position.copy(center);
+    mesh.visible = !this.stockMesh;
+    this.envelope = mesh;
     this.stockGroup.add(mesh, edges);
 
     // Machine table (generic until a machine model is configured in Phase 4).
@@ -213,8 +224,20 @@ export class SceneView {
   }
 
   // ----------------------------------------------------------- toolpath
-  setProgram(timeline: Timeline | null) {
+  setProgram(timeline: Timeline | null, stock?: { grid: StockGrid; tools: ToolInfo[] }) {
     this.timeline = timeline;
+    this.tools = new Map((stock?.tools ?? []).map((t) => [t.key, t]));
+    this.currentToolKey = "";
+    this.materialGroup.clear();
+    this.stockMesh?.dispose();
+    this.stockMesh = null;
+    this.stockPlayback = null;
+    if (timeline && !timeline.empty && stock?.grid) {
+      this.stockPlayback = new StockPlayback(timeline, stock.grid, stock.tools);
+      this.stockMesh = new StockMesh(this.stockPlayback.zmap);
+      this.materialGroup.add(this.stockMesh.group);
+    }
+    if (this.envelope) this.envelope.visible = !this.stockMesh;
     for (const child of [...this.pathGroup.children]) {
       if (child !== this.livePath) {
         this.pathGroup.remove(child);
@@ -294,15 +317,18 @@ export class SceneView {
   }
 
   // ---------------------------------------------------------------- tool
-  setToolDiameters(map: Record<string, number>) {
-    this.toolDiameters = map;
-    this.currentToolKey = "";
+  setLayerVisible(layer: Layer, visible: boolean) {
+    const target = layer === "path" ? this.pathGroup : layer === "stock" ? this.materialGroup : this.toolGroup;
+    target.visible = visible;
   }
 
-  private buildTool(diameter: number) {
+  private buildTool(info: ToolInfo | null) {
     this.toolGroup.clear();
-    const d = Math.max(diameter, 0.5);
-    const cutLen = Math.max(25, Math.min(d * 3, 80));
+    const tool: ToolInfo = info ?? { key: "none", number: null, type: "flat", diameter: 10, corner_radius: 0, point_angle: 180, source: "default", description: "" };
+    const d = Math.max(tool.diameter, 0.5);
+    const shape = new ToolShape({ ...tool, diameter: d });
+    const cutLen =
+      tool.type === "face" ? 40 : tool.type === "drill" || tool.type === "tap" || tool.type === "reamer" ? Math.min(Math.max(d * 5, 40), 140) : Math.max(25, Math.min(d * 3, 80));
     const holderD = Math.max(d * 1.6, 32);
     const holderLen = 55;
     const spindleD = 110;
@@ -314,7 +340,7 @@ export class SceneView {
       m.position.z = z0 + len / 2;
       return m;
     };
-    const steel = new THREE.MeshStandardMaterial({ color: 0xc9d0d8, metalness: 0.35, roughness: 0.35 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0xc9d0d8, metalness: 0.35, roughness: 0.35, side: THREE.DoubleSide });
     const holderMat = new THREE.MeshStandardMaterial({ color: 0x6b7684, metalness: 0.3, roughness: 0.45 });
     const spindleMat = new THREE.MeshStandardMaterial({
       color: 0x3a4250,
@@ -324,7 +350,18 @@ export class SceneView {
       opacity: 0.35,
       depthWrite: false,
     });
-    this.toolGroup.add(cyl(d / 2, cutLen, 0, steel));
+    // Cutter: lathe of the real tool profile (flat, ball, bull, drill point...).
+    const prof: THREE.Vector2[] = [];
+    const steps = 24;
+    for (let k = 0; k <= steps; k++) {
+      const r = (k / steps) * (d / 2);
+      prof.push(new THREE.Vector2(r, shape.profile(r)));
+    }
+    prof.push(new THREE.Vector2(d / 2, cutLen));
+    prof.push(new THREE.Vector2(0, cutLen));
+    const lathe = new THREE.LatheGeometry(prof, 40);
+    lathe.rotateX(Math.PI / 2);
+    this.toolGroup.add(new THREE.Mesh(lathe, steel));
     const taper = new THREE.CylinderGeometry(holderD / 2, d / 2 + 2, 18, 32);
     taper.rotateX(Math.PI / 2);
     const taperMesh = new THREE.Mesh(taper, holderMat);
@@ -338,7 +375,7 @@ export class SceneView {
     const key = String(tool ?? "none");
     if (key === this.currentToolKey) return;
     this.currentToolKey = key;
-    this.buildTool(this.toolDiameters[key] ?? 10);
+    this.buildTool(this.tools.get(key) ?? null);
   }
 
   // ------------------------------------------------------------- playback
@@ -350,6 +387,10 @@ export class SceneView {
     this.ensureTool(st.move.tool);
     this.toolGroup.position.set(...st.pos);
     const atEnd = t >= tl.total;
+    if (this.stockPlayback && this.stockMesh) {
+      this.stockPlayback.update(t);
+      this.stockMesh.update();
+    }
     if (this.donePath) {
       const i = st.index;
       const m = st.move;
