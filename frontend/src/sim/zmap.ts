@@ -52,16 +52,24 @@ export class ToolShape {
 }
 
 export class ZMap {
-  readonly height: Float32Array;
+  readonly height: Float32Array | Float64Array;
   /** Tool number that last cut each cell, -1 = uncut. */
   readonly cutBy: Int16Array;
   dirty: DirtyRect | null = null;
+  /** Statistics of the last applySegment call (used by the in-browser verifier). */
+  lastRemoved = 0;
+  lastCells = 0;
+  lastBelow = false;
   private readonly xs: Float64Array;
   private readonly ys: Float64Array;
 
-  constructor(readonly grid: StockGrid) {
+  /** f64 = true gives the same precision as the Python engine (for checks); playback uses f32. */
+  constructor(
+    readonly grid: StockGrid,
+    f64 = false,
+  ) {
     const n = grid.nx * grid.ny;
-    this.height = new Float32Array(n).fill(grid.top);
+    this.height = (f64 ? new Float64Array(n) : new Float32Array(n)).fill(grid.top);
     this.cutBy = new Int16Array(n).fill(-1);
     this.xs = Float64Array.from({ length: grid.nx }, (_, i) => grid.x0 + (i + 0.5) * grid.cx);
     this.ys = Float64Array.from({ length: grid.ny }, (_, j) => grid.y0 + (j + 0.5) * grid.cy);
@@ -73,11 +81,11 @@ export class ZMap {
     this.markDirty({ i0: 0, i1: this.grid.nx, j0: 0, j1: this.grid.ny });
   }
 
-  snapshot(): { h: Float32Array; c: Int16Array } {
+  snapshot(): { h: Float32Array | Float64Array; c: Int16Array } {
     return { h: this.height.slice(), c: this.cutBy.slice() };
   }
 
-  restore(s: { h: Float32Array; c: Int16Array }) {
+  restore(s: { h: Float32Array | Float64Array; c: Int16Array }) {
     this.height.set(s.h);
     this.cutBy.set(s.c);
     this.markDirty({ i0: 0, i1: this.grid.nx, j0: 0, j1: this.grid.ny });
@@ -94,6 +102,9 @@ export class ZMap {
     const [x0, y0, z0] = p0;
     const [x1, y1, z1] = p1;
     const lowest = Math.min(z0, z1);
+    this.lastRemoved = 0;
+    this.lastCells = 0;
+    this.lastBelow = false;
     if (lowest >= g.top - CUT_TOLERANCE) return false;
     const i0 = Math.max(0, Math.floor((Math.min(x0, x1) - R - g.x0) / g.cx - 0.5));
     const i1 = Math.min(g.nx, Math.ceil((Math.max(x0, x1) + R - g.x0) / g.cx + 0.5));
@@ -109,6 +120,9 @@ export class ZMap {
     const bottom = g.bottom;
     const h = this.height;
     let any = false;
+    let inside = false;
+    let removed = 0;
+    let cells = 0;
     for (let j = j0; j < j1; j++) {
       const Y = this.ys[j];
       const row = j * g.nx;
@@ -146,15 +160,21 @@ export class ZMap {
             }
           }
         }
+        inside = true;
         const nz = zc > bottom ? zc : bottom;
         const idx = row + i;
         if (nz < h[idx] - CUT_TOLERANCE) {
+          removed += h[idx] - nz;
+          cells++;
           h[idx] = nz;
           this.cutBy[idx] = toolId;
           any = true;
         }
       }
     }
+    this.lastBelow = inside && lowest < bottom - CUT_TOLERANCE;
+    this.lastRemoved = removed * g.cx * g.cy;
+    this.lastCells = cells;
     if (any) this.markDirty({ i0, i1, j0, j1 });
     return any;
   }

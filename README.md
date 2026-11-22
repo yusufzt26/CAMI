@@ -70,6 +70,9 @@ backend/app/
   api/programs.py     REST API
   db.py               SQLAlchemy models (PostgreSQL in production, SQLite for local dev)
 frontend/src/
+  engine/             TypeScript port of the interpreter, cutter comp, tool hints and stock checks,
+                      used by the browser-only preview build (results match the Python engine)
+  programFiles.ts     reads uploads: single programs or .zip archives of them
   sim/timeline.ts     time -> machine state (kinematics only)
   sim/zmap.ts         browser copy of the Z-map engine; stockPlayback.ts keeps it in step with playback
   viewer/SceneView.ts Three.js scene, independent of React
@@ -84,7 +87,7 @@ list of motions in the G54 frame (mm, arcs tessellated to 5 µm chord error); la
 
 | Method | Path | |
 |---|---|---|
-| POST | `/api/programs` | upload (multipart `file`) |
+| POST | `/api/programs` | upload (multipart `file`): one program, or a `.zip` whose .nc/.txt/.gcode/.tap (and extension-less O-number) files are each stored; the first by name is returned |
 | GET | `/api/programs` | recent programs |
 | GET | `/api/programs/{id}` | program + text |
 | POST | `/api/programs/{id}/interpret` | run the interpreter with job settings (work offsets, rapid rate, DPI mode, ...) |
@@ -102,6 +105,14 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 ```
 
 Without `DATABASE_URL` the backend uses SQLite in `backend/data/`. Tests: `cd backend && ../.venv/bin/pytest`.
+
+### Browser-only preview
+
+`cd frontend && npm run build:preview` builds a version that needs no server: the TypeScript engine in
+`src/engine/` verifies programs inside the page, and uploaded programs are kept in the browser.
+The result is a single self-contained file, `frontend/dist-preview/cami-preview.html` (also
+`dist-preview/index.html` for normal static hosting). It opens with the demo program loaded.
+The server build remains the reference: keep `src/engine/` in step with `backend/app/` when either changes.
 
 Try `samples/mould_plate_demo.nc` (face, pocket with G41, helical bore, peck drilling, rigid tapping) and
 `samples/unsafe_examples.nc` (stops at G68).

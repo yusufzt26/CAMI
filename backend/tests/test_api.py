@@ -32,3 +32,41 @@ def test_controller_table():
     with TestClient(app) as client:
         data = client.get("/api/controllers/fanuc").json()
         assert any(c["code"] == "G83" for c in data["g_codes"])
+
+
+def _zip(entries):
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_upload_zip_stores_every_program():
+    with TestClient(app) as client:
+        data = _zip(
+            {
+                "job/OP20.nc": "G90 G17 G21 G54\nG0 X1.\nM30\n",
+                "job/OP10.TAP": "G90 G17 G21 G54\nG0 X2.\nM30\n",
+                "job/O1234": "G90 G17 G21 G54\nG0 X3.\nM30\n",
+                "job/readme.pdf": b"%PDF-1.4",
+                "__MACOSX/job/._OP10.TAP": b"\x00\x05",
+            }
+        )
+        r = client.post("/api/programs", files={"file": ("job.zip", data, "application/zip")})
+        assert r.status_code == 201, r.text
+        assert r.json()["filename"] == "O1234.nc"
+        names = {p["filename"] for p in client.get("/api/programs").json()}
+        assert {"OP10.TAP", "OP20.nc", "O1234.nc"} <= names
+        assert "readme.pdf" not in names
+
+
+def test_upload_zip_without_programs_is_rejected():
+    with TestClient(app) as client:
+        r = client.post("/api/programs", files={"file": ("x.zip", _zip({"a.pdf": b"%PDF"}), "application/zip")})
+        assert r.status_code == 400
+        assert "no G-code programs" in r.json()["detail"]
+        assert client.post("/api/programs", files={"file": ("bad.zip", b"not a zip", "application/zip")}).status_code == 400

@@ -144,6 +144,8 @@ export interface ProgramMeta {
   line_count: number;
   uploaded_at: string;
   last_status: VerifyStatus | null;
+  /** Zip archive (or "sample") the program came from. */
+  source?: string;
 }
 
 export const WCS = ["G54", "G55", "G56", "G57", "G58", "G59"] as const;

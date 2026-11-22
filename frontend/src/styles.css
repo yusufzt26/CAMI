@@ -1286,3 +1286,155 @@ th {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ------------------------------------------------------------ notices */
+.topbar {
+  position: relative;
+}
+
+.topbar-notice {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 8px 10px 8px 14px;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  border: 1px solid #7dd3fc;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px #0f172a1f;
+}
+
+.icon-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.icon-btn:hover {
+  background: #0c4a6e14;
+}
+
+/* ------------------------------------------------------------ narrow screens */
+@media (max-width: 1000px) {
+  body {
+    overflow: auto;
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100%;
+    min-width: 0;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-block: 10px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .topbar-actions .select {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .topbar-file {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .workspace {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .center {
+    order: -1;
+    height: 72vh;
+    min-height: 420px;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .panel.left,
+  .panel.right {
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .bottom {
+    height: 420px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .workspace > *,
+  .viewport {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .playback {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .playback .scrubber {
+    flex: 1 1 100%;
+    order: 5;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .view-tools {
+    left: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .dro {
+    top: 58px;
+    padding: 6px 8px;
+  }
+
+  .dro-value {
+    font-size: 14px;
+  }
+
+  .legend {
+    right: 12px;
+    bottom: 50px;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+
+  .code-row .ln {
+    width: 44px;
+  }
+}

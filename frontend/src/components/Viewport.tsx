@@ -185,8 +185,8 @@ export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismiss
           <div className="empty-icon" aria-hidden>
             ⤒
           </div>
-          <h2>Drop a G-code program here</h2>
-          <p>or use Upload G-code above. Accepted: .NC · .TXT · .GCODE · .TAP</p>
+          <h2>Drop a G-code program or .zip here</h2>
+          <p>or use Upload G-code above. Accepted: .NC · .TXT · .GCODE · .TAP, or a .ZIP of them</p>
           <p className="muted">FANUC milling dialect. Unknown or unsafe codes stop verification instead of being skipped.</p>
         </div>
       )}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
+import { LOCAL_MODE, interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
 import { BottomPanel } from "./components/BottomPanel";
 import { JobSetupPanel } from "./components/JobSetupPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -40,9 +40,7 @@ export default function App() {
 
   const timeline = useMemo(() => (result ? new Timeline(result.moves) : null), [result]);
 
-  useEffect(() => {
-    listPrograms().then(setPrograms).catch(() => setPrograms([]));
-  }, []);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const seek = useCallback(
     (t: number) => {
@@ -119,9 +117,10 @@ export default function App() {
       setBusy(`Uploading ${file.name}…`);
       setError(null);
       try {
-        const meta = await uploadProgram(file);
-        setCurrent(meta);
-        await runInterpretation(meta, job);
+        const metas = await uploadProgram(file);
+        setNotice(metas.length > 1 ? `${metas.length} programs found in ${file.name}. Showing ${metas[0].filename}; pick another from the program list.` : null);
+        setCurrent(metas[0]);
+        await runInterpretation(metas[0], job);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setBusy(null);
@@ -135,10 +134,26 @@ export default function App() {
       const meta = programs.find((p) => p.id === id);
       if (!meta) return;
       setCurrent(meta);
+      setNotice(null);
       runInterpretation(meta, job);
     },
     [programs, runInterpretation, job],
   );
+
+  // Load the program list; the standalone preview opens its demo program straight away.
+  useEffect(() => {
+    listPrograms()
+      .then((list) => {
+        setPrograms(list);
+        if (LOCAL_MODE && list.length) {
+          const first = list.find((p) => p.filename === "mould_plate_demo.nc") ?? list[0];
+          setCurrent(first);
+          runInterpretation(first, job);
+        }
+      })
+      .catch(() => setPrograms([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onSceneReady = useCallback(
     (scene: SceneView | null) => {
@@ -183,6 +198,8 @@ export default function App() {
         busy={busy}
         onUpload={onUpload}
         onOpen={onOpenProgram}
+        notice={notice}
+        onDismissNotice={() => setNotice(null)}
       />
       <div className="workspace">
         <JobSetupPanel
