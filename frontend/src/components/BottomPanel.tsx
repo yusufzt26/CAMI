@@ -19,13 +19,14 @@ export interface ProgramSetView {
 }
 
 interface Props {
+  hidden?: boolean;
   programSet?: ProgramSetView | null;
   result: InterpretResponse | null;
   currentBlock: number | null;
   onSeekBlock: (block: number) => void;
 }
 
-export function BottomPanel({ programSet, result, currentBlock, onSeekBlock }: Props) {
+export function BottomPanel({ hidden, programSet, result, currentBlock, onSeekBlock }: Props) {
   const [tab, setTab] = useState<Tab>("code");
   const s = result?.summary;
   const diagCount = result ? result.diagnostics.filter((d) => d.severity !== "info").length : 0;
@@ -36,7 +37,7 @@ export function BottomPanel({ programSet, result, currentBlock, onSeekBlock }: P
   }, [result, s?.status]);
 
   return (
-    <section className="bottom">
+    <section className="bottom" hidden={hidden}>
       <div className="tabs">
         <button className={tab === "code" ? "on" : ""} onClick={() => setTab("code")}>
           G-code blocks {result && <span className="badge">{result.blocks.length}</span>}

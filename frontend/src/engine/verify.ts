@@ -12,6 +12,20 @@ const MAX_CELLS = 160_000;
 const MIN_CELL = 0.2;
 const MAX_PER_CODE = 25;
 
+/** Per-move engagement from the stock model (arrays aligned with moves). */
+export interface MoveLoad {
+  /** Material removed, mm³. */
+  removed: Float32Array;
+  /** Axial depth of cut: deepest material removed at one point, mm. */
+  ap: Float32Array;
+  /** Raw radial width of cut for this move alone, mm (removed / (XY length × ap)); noisy for moves shorter than the grid. */
+  ae: Float32Array;
+  /** XY travel, mm. */
+  lxy: Float32Array;
+  /** 1 = entry into material steeper than 45 degrees (plunge or steep ramp). */
+  plunge: Uint8Array;
+}
+
 export function stockBox(s: StockSetup): [Vec3, Vec3] {
   const [sx, sy, sz] = s.size;
   const a = s.allowance;
@@ -64,6 +78,8 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     counts.set(code, n);
     if (n <= MAX_PER_CODE) diags.push({ severity, code, message, line: m.line, block: m.block, halt: false });
   };
+  const n = moves.length;
+  const load: MoveLoad = { removed: new Float32Array(n), ap: new Float32Array(n), ae: new Float32Array(n), lxy: new Float32Array(n), plunge: new Uint8Array(n) };
   const removedByTool = new Map<number | null, number>();
   let timeIn = 0;
   let timeAir = 0;
@@ -77,7 +93,8 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     }
     return s;
   };
-  for (const m of moves) {
+  for (let mi = 0; mi < n; mi++) {
+    const m = moves[mi];
     if (m.kind !== "rapid" && m.kind !== "feed" && m.kind !== "arc") continue;
     const tool = shapeFor(m.tool);
     const pts = m.points ?? [m.start, m.end];
@@ -85,11 +102,27 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     let removed = 0;
     let cells = 0;
     let below = false;
+    let ap = 0;
+    let lxy = 0;
     for (let i = 0; i < pts.length - 1; i++) {
       zm.applySegment(pts[i], pts[i + 1], tool, toolId);
       removed += zm.lastRemoved;
       cells += zm.lastCells;
       below = below || zm.lastBelow;
+      if (zm.lastMaxDepth > ap) ap = zm.lastMaxDepth;
+      lxy += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    }
+    // Engagement: ap = deepest cut, ae = removed cross-section / ap (plunges count as full width).
+    load.removed[mi] = removed;
+    load.ap[mi] = ap;
+    load.lxy[mi] = lxy;
+    if (removed > 0 && ap > 0) {
+      const D = tool.R * 2;
+      const dz = m.end[2] - m.start[2];
+      // Plunge / steep ramp into material: descending steeper than 45 degrees.
+      if (dz < -0.01 && lxy < -dz) load.plunge[mi] = 1;
+      // Raw per-move width; the optimiser averages it over a path window, since short moves are below the grid size.
+      load.ae[mi] = lxy > 1e-6 ? Math.min(D, removed / (lxy * ap)) : D;
     }
     if (cells) removedByTool.set(m.tool, (removedByTool.get(m.tool) ?? 0) + removed);
     if (m.kind === "rapid") {
@@ -135,7 +168,7 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     rapid_in_stock_moves: rapidHits,
     lowest_point: Math.round(lowest * 1e4) / 1e4,
   };
-  return { grid, diags, stats, final: zm.state() };
+  return { grid, diags, stats, final: zm.state(), load };
 }
 
 export function verify(
@@ -195,6 +228,7 @@ export function verify(
     tools: [...tools.entries()].map(([n, spec]) => ({ ...spec, key: n === null ? "none" : String(n) })),
     stock: sim.stats,
     startStock: start,
+    load: sim.load,
     finalStock: sim.final,
   };
 }

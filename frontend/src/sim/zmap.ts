@@ -74,6 +74,8 @@ export class ZMap {
   lastRemoved = 0;
   lastCells = 0;
   lastBelow = false;
+  /** Deepest material removed at one cell by the last segment (axial depth of cut, mm). */
+  lastMaxDepth = 0;
   private readonly xs: Float64Array;
   private readonly ys: Float64Array;
 
@@ -132,6 +134,7 @@ export class ZMap {
     this.lastRemoved = 0;
     this.lastCells = 0;
     this.lastBelow = false;
+    this.lastMaxDepth = 0;
     if (lowest >= g.top - CUT_TOLERANCE) return false;
     const i0 = Math.max(0, Math.floor((Math.min(x0, x1) - R - g.x0) / g.cx - 0.5));
     const i1 = Math.min(g.nx, Math.ceil((Math.max(x0, x1) + R - g.x0) / g.cx + 0.5));
@@ -150,6 +153,7 @@ export class ZMap {
     let inside = false;
     let removed = 0;
     let cells = 0;
+    let maxDepth = 0;
     for (let j = j0; j < j1; j++) {
       const Y = this.ys[j];
       const row = j * g.nx;
@@ -191,7 +195,9 @@ export class ZMap {
         const nz = zc > bottom ? zc : bottom;
         const idx = row + i;
         if (nz < h[idx] - CUT_TOLERANCE) {
-          removed += h[idx] - nz;
+          const dd = h[idx] - nz;
+          removed += dd;
+          if (dd > maxDepth) maxDepth = dd;
           cells++;
           h[idx] = nz;
           this.cutBy[idx] = toolId;
@@ -202,6 +208,7 @@ export class ZMap {
     this.lastBelow = inside && lowest < bottom - CUT_TOLERANCE;
     this.lastRemoved = removed * g.cx * g.cy;
     this.lastCells = cells;
+    this.lastMaxDepth = maxDepth;
     if (any) this.markDirty({ i0, i1, j0, j1 });
     return any;
   }

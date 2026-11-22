@@ -18,6 +18,8 @@ interface Props {
   onView: (v: ViewName) => void;
   onZoom: (factor: number) => void;
   onLayer: (layer: Layer, visible: boolean) => void;
+  /** Toolpath coloured by cutting load (NC Optimiser): legend entries. */
+  loadLegend?: { label: string; color: string }[] | null;
 }
 
 const LAYERS: { key: Layer; label: string }[] = [
@@ -42,7 +44,7 @@ const KIND_LABEL: Record<string, string> = {
   stop: "STOP",
 };
 
-export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismissError, result, state, onView, onZoom, onLayer }: Props) {
+export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismissError, result, state, onView, onZoom, onLayer, loadLegend }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState(false);
   const [layers, setLayers] = useState<Record<Layer, boolean>>({ stock: true, path: true, tool: true });
@@ -152,7 +154,19 @@ export function Viewport({ onReady, onUpload, hasProgram, busy, error, onDismiss
         </div>
       )}
 
-      {hasProgram && (
+      {hasProgram && loadLegend && (
+        <div className="legend load-legend">
+          <b>Load</b>
+          {loadLegend.map((l) => (
+            <span key={l.label}>
+              <i style={{ background: l.color }} />
+              {l.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {hasProgram && !loadLegend && (
         <div className="legend">
           <span>
             <i style={{ background: PATH_COLORS.rapid }} />

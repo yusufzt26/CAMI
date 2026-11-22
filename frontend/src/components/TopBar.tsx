@@ -14,9 +14,11 @@ interface Props {
   notice: string | null;
   onDismissNotice: () => void;
   onClear: () => void;
+  view: "sim" | "opt";
+  onView: (v: "sim" | "opt") => void;
 }
 
-export function TopBar({ programs, current, summary, busy, onUpload, onOpen, notice, onDismissNotice, onClear }: Props) {
+export function TopBar({ programs, current, summary, busy, onUpload, onOpen, notice, onDismissNotice, onClear, view, onView }: Props) {
   const input = useRef<HTMLInputElement>(null);
   // Two-step clear (the page cannot use confirm()): first click arms, second click clears.
   const [armed, setArmed] = useState(false);
@@ -38,6 +40,15 @@ export function TopBar({ programs, current, summary, busy, onUpload, onOpen, not
           <div className="brand-sub">CAMI · VMC G-code Verification</div>
         </div>
       </div>
+
+      <nav className="app-tabs" aria-label="Module">
+        <button className={view === "sim" ? "on" : ""} onClick={() => onView("sim")}>
+          CAMI Simulator
+        </button>
+        <button className={view === "opt" ? "on" : ""} onClick={() => onView("opt")}>
+          NC Optimiser
+        </button>
+      </nav>
 
       <div className="topbar-actions">
         <button className="btn primary" onClick={() => input.current?.click()} disabled={!!busy}>

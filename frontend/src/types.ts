@@ -129,6 +129,8 @@ export interface StockStats {
 export interface InterpretResponse {
   /** Set simulation only (browser engine): stock this program started from. */
   startStock?: import("./sim/zmap").StockState;
+  /** Browser engine only: per-move cutting engagement for the NC Optimiser. */
+  load?: import("./engine/verify").MoveLoad;
   program: { id: number; filename: string };
   blocks: BlockRow[];
   moves: Move[];

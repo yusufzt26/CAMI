@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LOCAL_MODE, clearPrograms, getProgramText, interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
 import { type ProgramSetInfo, SetRunner } from "./setRunner";
+import { runInBrowser } from "./engineRun";
+import { OptimiserView } from "./optimiser/OptimiserView";
+import { LEVELS } from "./optimiser/analysis";
 import { BottomPanel } from "./components/BottomPanel";
 import { JobSetupPanel } from "./components/JobSetupPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -38,6 +41,12 @@ export default function App() {
   const [carry, setCarry] = useState(true);
   const [setVersion, setSetVersion] = useState(0);
   const runnerRef = useRef<SetRunner | null>(null);
+
+  // Module tabs: CAMI Simulator | NC Optimiser.
+  const [view, setView] = useState<"sim" | "opt">("sim");
+  const [loadColors, setLoadColors] = useState(false);
+  const [computedLoad, setComputedLoad] = useState<{ of: InterpretResponse; res: InterpretResponse } | null>(null);
+  const [optBusy, setOptBusy] = useState<string | null>(null);
   const carryRef = useRef(true);
   carryRef.current = carry;
 
@@ -256,6 +265,31 @@ export default function App() {
     [],
   );
 
+  // The optimiser needs the per-move load from the browser engine. Server results do not carry it,
+  // so the same program is run in the browser (identical engine) when the optimiser tab is opened.
+  const optResult = result?.load ? result : computedLoad && computedLoad.of === result ? computedLoad.res : null;
+  const optTimeline = useMemo(() => (optResult ? (optResult === result ? timeline : new Timeline(optResult.moves)) : null), [optResult, result, timeline]);
+  useEffect(() => {
+    if (view !== "opt" || !result || result.load || !current || (computedLoad && computedLoad.of === result)) return;
+    let cancelled = false;
+    setOptBusy("Analysing cutting load…");
+    (async () => {
+      try {
+        await new Promise((r) => setTimeout(r, 30));
+        const text = await getProgramText(current.id);
+        const res = runInBrowser(text, appliedJob, result.program, result.startStock);
+        if (!cancelled) setComputedLoad({ of: result, res });
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setOptBusy(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, result]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const state = timeline && !timeline.empty ? timeline.stateAt(uiTime) : null;
   const setupDirty = JSON.stringify(job) !== JSON.stringify(appliedJob);
   const apply = () => current && runInterpretation(current, job);
@@ -287,8 +321,28 @@ export default function App() {
         notice={notice}
         onDismissNotice={() => setNotice(null)}
         onClear={onClear}
+        view={view}
+        onView={setView}
       />
-      <div className="workspace">
+      <div className="opt-pane" hidden={view !== "opt"}>
+        <OptimiserView
+          result={optResult}
+          timeline={optTimeline}
+          busy={optBusy ?? busy}
+          error={error}
+          loadColors={loadColors}
+          onLoadColors={(on, analysis) => {
+            setLoadColors(on);
+            sceneRef.current?.setLoadColors(on && analysis ? analysis.level : null, LEVELS.map((l) => l.color));
+          }}
+          onShowInSimulator={(i) => {
+            setView("sim");
+            setPlaying(false);
+            if (timeline && !timeline.empty) seek(timeline.startOf(Math.min(i, timeline.moves.length - 1)));
+          }}
+        />
+      </div>
+      <div className="workspace" hidden={view !== "sim"}>
         <JobSetupPanel
           stock={stock}
           onStock={setStock}
@@ -311,6 +365,7 @@ export default function App() {
             onView={(v) => sceneRef.current?.setView(v)}
             onZoom={(f) => sceneRef.current?.zoom(f)}
             onLayer={(layer, on) => sceneRef.current?.setLayerVisible(layer, on)}
+            loadLegend={loadColors ? LEVELS : null}
           />
           <PlaybackBar
             disabled={!timeline || timeline.empty}
@@ -360,6 +415,7 @@ export default function App() {
         />
       </div>
       <BottomPanel
+        hidden={view !== "sim"}
         programSet={
           programSet && runnerRef.current
             ? {

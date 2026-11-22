@@ -262,6 +262,7 @@ export class SceneView {
     }
     const pos = new Float32Array(segCount * 6);
     const col = new Float32Array(segCount * 6);
+    this.pathColors = col;
     this.moveVertexStart = new Int32Array(moves.length + 1);
     let v = 0;
     const box = new THREE.Box3();
@@ -301,7 +302,37 @@ export class SceneView {
     future.frustumCulled = false;
     done.frustumCulled = false;
     this.donePath = done;
+    this.pathColorAttr = geo.getAttribute("color") as THREE.BufferAttribute;
     this.pathGroup.add(future, done);
+    if (this.loadLevels) this.applyPathColors();
+  }
+
+  private pathColors: Float32Array | null = null;
+  private pathColorAttr: THREE.BufferAttribute | null = null;
+  private loadLevels: { levels: Int8Array; colors: THREE.Color[] } | null = null;
+
+  /** Colour cutting moves by load level (NC Optimiser); null restores the normal path colours. */
+  setLoadColors(levels: Int8Array | null, colors: string[] = []) {
+    this.loadLevels = levels ? { levels, colors: colors.map((c) => new THREE.Color(c)) } : null;
+    this.applyPathColors();
+  }
+
+  private applyPathColors() {
+    const col = this.pathColors;
+    const tl = this.timeline;
+    if (!col || !tl || tl.empty || !this.moveVertexStart) return;
+    const ll = this.loadLevels && this.loadLevels.levels.length === tl.moves.length ? this.loadLevels : null;
+    tl.moves.forEach((m, i) => {
+      if (!(m.kind === "rapid" || m.kind === "feed" || m.kind === "arc")) return;
+      const lv = ll ? ll.levels[i] : -1;
+      const c = lv >= 0 ? ll!.colors[lv] : colorFor(m);
+      for (let v = this.moveVertexStart![i]; v < this.moveVertexStart![i + 1]; v++) {
+        col[v * 3] = c.r;
+        col[v * 3 + 1] = c.g;
+        col[v * 3 + 2] = c.b;
+      }
+    });
+    if (this.pathColorAttr) this.pathColorAttr.needsUpdate = true;
   }
 
   setHaltMarker(pos: Vec3 | null) {
