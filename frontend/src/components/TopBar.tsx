@@ -1,8 +1,8 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProgramMeta, Summary } from "../types";
 import { STATUS_LABEL } from "./format";
 
-export const ACCEPT = ".nc,.txt,.gcode,.tap,.NC,.TXT,.GCODE,.TAP";
+export const ACCEPT = ".nc,.txt,.gcode,.tap,.zip,.NC,.TXT,.GCODE,.TAP,.ZIP";
 
 interface Props {
   programs: ProgramMeta[];
@@ -11,10 +11,22 @@ interface Props {
   busy: string | null;
   onUpload: (f: File) => void;
   onOpen: (id: number) => void;
+  notice: string | null;
+  onDismissNotice: () => void;
+  onClear: () => void;
+  view: "sim" | "opt";
+  onView: (v: "sim" | "opt") => void;
 }
 
-export function TopBar({ programs, current, summary, busy, onUpload, onOpen }: Props) {
+export function TopBar({ programs, current, summary, busy, onUpload, onOpen, notice, onDismissNotice, onClear, view, onView }: Props) {
   const input = useRef<HTMLInputElement>(null);
+  // Two-step clear (the page cannot use confirm()): first click arms, second click clears.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
   return (
     <header className="topbar">
       <div className="brand">
@@ -29,9 +41,18 @@ export function TopBar({ programs, current, summary, busy, onUpload, onOpen }: P
         </div>
       </div>
 
+      <nav className="app-tabs" aria-label="Module">
+        <button className={view === "sim" ? "on" : ""} onClick={() => onView("sim")}>
+          CAMI Simulator
+        </button>
+        <button className={view === "opt" ? "on" : ""} onClick={() => onView("opt")}>
+          NC Optimiser
+        </button>
+      </nav>
+
       <div className="topbar-actions">
         <button className="btn primary" onClick={() => input.current?.click()} disabled={!!busy}>
-          <span aria-hidden>⤒</span> Upload G-code
+          <span aria-hidden>⤒</span> Upload G-code / .zip
         </button>
         <input
           ref={input}
@@ -44,17 +65,31 @@ export function TopBar({ programs, current, summary, busy, onUpload, onOpen }: P
             e.target.value = "";
           }}
         />
+        <button
+          className={`btn ${armed ? "danger" : ""}`}
+          disabled={!!busy || (!current && programs.length === 0)}
+          title="Remove uploaded programs and results, and reset the job setup"
+          onClick={() => {
+            if (armed) {
+              setArmed(false);
+              onClear();
+            } else setArmed(true);
+          }}
+        >
+          {armed ? "Click again to clear" : "Clear"}
+        </button>
         <select
           className="select"
           value={current?.id ?? ""}
           onChange={(e) => e.target.value && onOpen(Number(e.target.value))}
           disabled={!!busy || programs.length === 0}
-          title="Recently uploaded programs"
+          title="Uploaded programs"
         >
-          <option value="">{programs.length ? "Recent programs…" : "No programs yet"}</option>
+          <option value="">{programs.length ? `Programs (${programs.length})…` : "No programs yet"}</option>
           {programs.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.filename} · {new Date(p.uploaded_at).toLocaleString()}
+              {p.filename}
+              {p.source && p.source !== "sample" ? ` · ${p.source}` : p.source === "sample" ? " · sample" : ` · ${new Date(p.uploaded_at).toLocaleString()}`}
             </option>
           ))}
         </select>
@@ -68,6 +103,7 @@ export function TopBar({ programs, current, summary, busy, onUpload, onOpen }: P
             </span>
             <span className="file-meta">
               {current.line_count.toLocaleString()} lines · FANUC
+              {current.source && current.source !== "sample" ? ` · from ${current.source}` : ""}
             </span>
           </>
         ) : (
@@ -79,6 +115,14 @@ export function TopBar({ programs, current, summary, busy, onUpload, onOpen }: P
         <div className={`status-pill status-${summary.status}`} title="Toolpath interpretation status">
           <span className="dot" />
           {STATUS_LABEL[summary.status]}
+        </div>
+      )}
+      {notice && (
+        <div className="topbar-notice" role="status">
+          <span>{notice}</span>
+          <button className="icon-btn" onClick={onDismissNotice} aria-label="Dismiss">
+            ×
+          </button>
         </div>
       )}
     </header>

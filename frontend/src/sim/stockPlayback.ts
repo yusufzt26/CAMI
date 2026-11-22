@@ -1,6 +1,6 @@
 import type { Move, StockGrid, ToolInfo, Vec3 } from "../types";
 import type { Timeline } from "./timeline";
-import { ToolShape, ZMap } from "./zmap";
+import { type StockState, ToolShape, ZMap } from "./zmap";
 
 const MAX_CHECKPOINTS = 40;
 const CUTTING_KINDS = new Set(["rapid", "feed", "arc"]);
@@ -18,8 +18,9 @@ export class StockPlayback {
   private checkpoints = new Map<number, ReturnType<ZMap["snapshot"]>>();
   private readonly interval: number;
 
-  constructor(private timeline: Timeline, grid: StockGrid, tools: ToolInfo[]) {
+  constructor(private timeline: Timeline, grid: StockGrid, tools: ToolInfo[], start?: StockState) {
     this.zmap = new ZMap(grid);
+    if (start) this.zmap.loadStart(start);
     for (const t of tools) this.shapes.set(t.key, new ToolShape(t));
     this.fallback = new ToolShape({ key: "none", number: null, type: "flat", diameter: 10, corner_radius: 0, point_angle: 180, source: "default", description: "" });
     this.interval = Math.max(50, Math.ceil(timeline.moves.length / MAX_CHECKPOINTS));

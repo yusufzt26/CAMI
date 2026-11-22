@@ -83,9 +83,9 @@ class ToolSpec:
 
 # ------------------------------------------------------------------ hints
 _T_RE = re.compile(r"\bT\s*(\d{1,3})\b")
-_D_RE = re.compile(r"(?:\bD(?:IA)?\s*=?\s*|Ø\s*|\bDIA\.?\s*)(\d+(?:\.\d+)?)")
+_D_RE = re.compile(r"(?:\bD(?:IA)?\s*[=:]?\s*|Ø\s*|\b(?:TOOL\s*)?DIA(?:METER)?\.?\s*[=:]?\s*)(\d+(?:\.\d+)?)")
 _MM_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*MM\b")
-_CR_RE = re.compile(r"\b(?:CR|RC|R)\s*=?\s*(\d+(?:\.\d+)?)\b")
+_CR_RE = re.compile(r"\b(?:CORNER\s*RAD(?:IUS)?|CR|RC|R)\s*[=:]?\s*(\d+(?:\.\d+)?)\b")
 _THREAD_RE = re.compile(r"\bM(\d+(?:\.\d+)?)(?:\s*X|\b)")
 _ANGLE_RE = re.compile(r"(\d{2,3})\s*(?:DEG|°)")
 
@@ -93,7 +93,7 @@ _KEYWORDS = [
     ("ball", ("BALL",)),
     ("bull", ("BULL", "TORUS", "TOROID", "CORNER R")),
     ("face", ("FACE",)),
-    ("spot", ("SPOT", "CENTRE DRILL", "CENTER DRILL", "C/DRILL")),
+    ("spot", ("SPOT", "CENTRE DRILL", "CENTER DRILL", "CENTERING DRILL", "CENTRING DRILL", "C/DRILL")),
     ("tap", ("TAP",)),
     ("reamer", ("REAM",)),
     ("counterbore", ("C'BORE", "CBORE", "COUNTERBORE", "C-BORE")),
@@ -137,14 +137,30 @@ def _parse_description(text: str) -> dict | None:
     return out
 
 
-def tool_hints_from_comments(blocks) -> dict[int, dict]:
+def tool_hints_from_comments(blocks) -> dict[int | None, dict]:
     """Read tool descriptions that CAM posts write as comments.
 
     Handles "(T2 D16 FLAT END MILL)", "(T1 D=10. CR=0. - FLAT END MILL)",
     lists separated by '/', and comments on the tool-change line
     ("T4 M06 (M12 X 1.75 TAP)").
+
+    Programs with no T word at all ("(Tool Type : Bull-nose)", "(TOOL DIA : 19.9 ,CORNER RAD : 0.8)")
+    get the header's tool under the key None.
     """
-    hints: dict[int, dict] = {}
+    hints: dict[int | None, dict] = {}
+    if not any(w.letter == "T" for b in blocks for w in b.words):
+        # One program per tool with no T word (e.g. WorkNC): the tool is described in the header.
+        header = []
+        for b in blocks:
+            if any(w.letter in "XYZ" for w in b.words):
+                break
+            if b.comment and re.search(r"TOOL|DIA|CORNER", b.comment.upper()):
+                header.append(b.comment)
+        info = _parse_description(" ; ".join(header)) if header else None
+        if info:
+            info["description"] = " / ".join(h.strip() for h in header[:2])
+            hints[None] = info
+        return hints
     for b in blocks:
         if not b.comment:
             continue
@@ -172,7 +188,7 @@ def resolve_tools(tool_numbers, hints: dict[int, dict], overrides: dict[str, dic
         if key in overrides and overrides[key]:
             o = overrides[key]
             spec = ToolSpec(n, o.get("type", "flat"), o.get("diameter", 10.0), o.get("corner_radius", 0.0), o.get("point_angle", DEFAULT_POINT_ANGLE.get(o.get("type", ""), 118.0)), "user", o.get("description", ""))
-        elif n is not None and n in hints:
+        elif n in hints:
             h = hints[n]
             t = h.get("type", "flat")
             spec = ToolSpec(
