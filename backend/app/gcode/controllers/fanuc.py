@@ -17,6 +17,7 @@ _G = [
     _g("G2", "motion", "Circular interpolation CW", S),
     _g("G3", "motion", "Circular interpolation CCW", S),
     _g("G4", "nonmodal", "Dwell", S),
+    _g("G5", "lookahead", "High-speed machining (P10000 = AI contour control on, P0 = off)", S, "Only P10000 / P0 are accepted; other P values run high-speed cycle data that is not simulated."),
     _g("G5.1", "lookahead", "AI contour control", N),
     _g("G8", "lookahead", "Look-ahead control", N),
     _g("G9", "nonmodal", "Exact stop (one block)", N),

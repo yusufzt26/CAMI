@@ -234,3 +234,16 @@ def test_demo_program_runs_clean():
 def test_unsafe_sample_halts_at_g68():
     r = interpret((SAMPLES / "unsafe_examples.nc").read_text())
     assert r.summary["status"] == "halted" and r.summary["halted_at_line"] == 9
+
+
+def test_g05_p10000_is_accepted_other_g05_halts():
+    from app.gcode import interpret
+
+    ok = interpret("G90 G17 G21 G54\nG05 P10000\nG0 X10.\nG05 P0\nM30\n")
+    assert ok.summary["status"] != "halted"
+    assert ok.moves[-1]["end"][0] == 10.0
+    assert any(d["code"] == "NO_EFFECT" and "G05" in d["message"] for d in ok.diagnostics)
+    for bad in ("G05 P2\n", "G05\n", "G05 P10000 X5.\n"):
+        r = interpret("G90 G17 G21 G54\n" + bad + "M30\n")
+        assert r.summary["status"] == "halted", bad
+        assert r.summary["halted_at_line"] == 2

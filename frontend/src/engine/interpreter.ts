@@ -381,6 +381,8 @@ export class Interpreter {
         this.diag("warning", "LIMITED", `${code} (${spec.description}): ${spec.note}`, block, false, `limited:${code}`);
     }
 
+    if (gCodes.includes("G5")) this.g05(block, seen, gCodes);
+
     const axisNonmodal = gCodes.filter((c) => ["G28", "G53", "G92", "G52", "G4"].includes(c));
     if (axisNonmodal.length > 1) this.diag("error", "MODAL_CONFLICT", `${axisNonmodal.join(" and ")} cannot be combined in one block. Verification stopped.`, block, true);
 
@@ -516,6 +518,23 @@ export class Interpreter {
   }
 
   // ------------------------------------------------------------------ parts
+  /** G05 P10000 / P0: AI contour control on / off (no path effect). Other G05 forms halt. */
+  private g05(block: Block, letters: Letters, gCodes: string[]) {
+    const p = letters.get("P");
+    const others = [...[...letters.keys()].filter((l) => l !== "P"), ...gCodes.filter((c) => c === "G4" || c in CYCLE_OPS)];
+    if (!p || !(p.value === 0 || p.value === 10000) || others.length)
+      this.diag(
+        "error",
+        "UNSUPPORTED_CODE",
+        `G05${p ? " P" + p.raw : ""}${others.length ? " with " + others.join(", ") : ""}: only G05 P10000 (AI contour control on) ` +
+          "and G05 P0 (off) are supported. Other forms run high-speed cycle data stored in the control. Verification stopped.",
+        block,
+        true,
+      );
+    const state = p!.value ? "on" : "off";
+    this.diag("info", "NO_EFFECT", `G05 P${p!.raw} (AI contour control ${state}) changes feed look-ahead only; it has no effect on the simulated path.`, block, false, `g05:${state}`);
+  }
+
   private checkStartup(block: Block) {
     if (this.motionSeen) return;
     this.motionSeen = true;

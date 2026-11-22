@@ -343,6 +343,9 @@ class Interpreter:
             if spec.support == Support.LIMITED and spec.note and code not in ("G28", "G53", "G41", "G42"):
                 self.diag("warning", "LIMITED", f"{code} ({spec.description}): {spec.note}", block, once_key=f"limited:{code}")
 
+        if "G5" in g_codes:
+            self._g05(block, seen_letters, g_codes)
+
         axis_nonmodal = [c for c in g_codes if c in ("G28", "G53", "G92", "G52", "G4")]
         if len(axis_nonmodal) > 1:
             self.diag(
@@ -519,6 +522,24 @@ class Interpreter:
         return True
 
     # ------------------------------------------------------------------ parts
+    def _g05(self, block, letters, g_codes):
+        """G05 P10000 / P0 switch AI contour control (look-ahead) on / off: no path effect.
+        Any other G05 runs high-speed cycle data from controller memory, which cannot be known."""
+        p = letters.get("P")
+        others = [l for l in letters if l != "P"]
+        clash = [c for c in g_codes if c == "G4" or c in CYCLE_OPS]
+        if p is None or p.value not in (0, 10000) or others or clash:
+            self.diag(
+                "error",
+                "UNSUPPORTED_CODE",
+                f"G05{' P' + p.raw if p else ''}{' with ' + ', '.join(others + clash) if others or clash else ''}: only G05 P10000 (AI contour control on) "
+                "and G05 P0 (off) are supported. Other forms run high-speed cycle data stored in the control. Verification stopped.",
+                block,
+                halt=True,
+            )
+        state = "on" if p.value else "off"
+        self.diag("info", "NO_EFFECT", f"G05 P{p.raw} (AI contour control {state}) changes feed look-ahead only; it has no effect on the simulated path.", block, once_key=f"g05:{state}")
+
     @staticmethod
     def _has_axes(letters: dict, xy_only=False, include_arc=False) -> bool:
         keys = ("X", "Y") if xy_only else AXES
