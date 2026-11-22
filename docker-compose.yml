@@ -1,0 +1,30 @@
+# Office-server deployment: one app container + PostgreSQL.
+# Start with:  docker compose up -d --build   then open http://<server-ip>:8000 in Chrome.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cami
+      POSTGRES_USER: cami
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cami"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://cami:${POSTGRES_PASSWORD:-change-me}@db:5432/cami
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
