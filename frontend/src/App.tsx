@@ -117,16 +117,25 @@ export default function App() {
       setBusy(`Uploading ${file.name}…`);
       setError(null);
       try {
-        const metas = await uploadProgram(file);
-        setNotice(metas.length > 1 ? `${metas.length} programs found in ${file.name}. Showing ${metas[0].filename}; pick another from the program list.` : null);
+        const { metas, stock: found } = await uploadProgram(file);
+        let j = job;
+        const notes: string[] = [];
+        if (metas.length > 1) notes.push(`${metas.length} programs found in ${file.name}. Showing ${metas[0].filename}; pick another from the program list.`);
+        if (found) {
+          const next: StockSetup = { ...stock, size: found.size, origin: found.origin, topZ: found.topZ, allowance: 0 };
+          setStock(next);
+          j = { ...job, stock: next };
+          notes.push(`Stock set from ${found.source}: ${found.size.join(" × ")} mm, part zero at the ${found.origin.replace(/-/g, " ").replace("center", "centre")}${found.topZ ? ` (top Z${found.topZ})` : ""}. Check it in Job & stock setup.`);
+        }
+        setNotice(notes.join(" ") || null);
         setCurrent(metas[0]);
-        await runInterpretation(metas[0], job);
+        await runInterpretation(metas[0], j);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setBusy(null);
       }
     },
-    [runInterpretation, job],
+    [runInterpretation, job, stock],
   );
 
   const onOpenProgram = useCallback(

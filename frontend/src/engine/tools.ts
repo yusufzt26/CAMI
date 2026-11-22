@@ -24,9 +24,9 @@ export function normalised(t: ToolSpec): ToolSpec {
 }
 
 const T_RE = /\bT\s*(\d{1,3})\b/;
-const D_RE = /(?:\bD(?:IA)?\s*=?\s*|Ø\s*|\bDIA\.?\s*)(\d+(?:\.\d+)?)/;
+const D_RE = /(?:\bD(?:IA)?\s*[=:]?\s*|Ø\s*|\b(?:TOOL\s*)?DIA(?:METER)?\.?\s*[=:]?\s*)(\d+(?:\.\d+)?)/;
 const MM_RE = /\b(\d+(?:\.\d+)?)\s*MM\b/;
-const CR_RE = /\b(?:CR|RC|R)\s*=?\s*(\d+(?:\.\d+)?)\b/;
+const CR_RE = /\b(?:CORNER\s*RAD(?:IUS)?|CR|RC|R)\s*[=:]?\s*(\d+(?:\.\d+)?)\b/;
 const THREAD_RE = /\bM(\d+(?:\.\d+)?)(?:\s*X|\b)/;
 const ANGLE_RE = /(\d{2,3})\s*(?:DEG|°)/;
 
@@ -34,7 +34,7 @@ const KEYWORDS: [string, string[]][] = [
   ["ball", ["BALL"]],
   ["bull", ["BULL", "TORUS", "TOROID", "CORNER R"]],
   ["face", ["FACE"]],
-  ["spot", ["SPOT", "CENTRE DRILL", "CENTER DRILL", "C/DRILL"]],
+  ["spot", ["SPOT", "CENTRE DRILL", "CENTER DRILL", "CENTERING DRILL", "CENTRING DRILL", "C/DRILL"]],
   ["tap", ["TAP"]],
   ["reamer", ["REAM"]],
   ["counterbore", ["C'BORE", "CBORE", "COUNTERBORE", "C-BORE"]],
@@ -81,8 +81,22 @@ function parseDescription(text: string): Hint | null {
   return out;
 }
 
-export function toolHintsFromComments(blocks: Block[]): Map<number, Hint> {
-  const hints = new Map<number, Hint>();
+/** Programs with no T word take the tool from the header comments, under the key null (see backend). */
+export function toolHintsFromComments(blocks: Block[]): Map<number | null, Hint> {
+  const hints = new Map<number | null, Hint>();
+  if (!blocks.some((b) => b.words.some((w) => w.letter === "T"))) {
+    const header: string[] = [];
+    for (const b of blocks) {
+      if (b.words.some((w) => "XYZ".includes(w.letter))) break;
+      if (b.comment && /TOOL|DIA|CORNER/.test(b.comment.toUpperCase())) header.push(b.comment);
+    }
+    const info = header.length ? parseDescription(header.join(" ; ")) : null;
+    if (info) {
+      info.description = header.slice(0, 2).map((h) => h.trim()).join(" / ");
+      hints.set(null, info);
+    }
+    return hints;
+  }
   for (const b of blocks) {
     if (!b.comment) continue;
     const parts = b.comment.split(/\s\/\s|;/);
@@ -108,7 +122,7 @@ export interface ToolOverrideIn {
   description?: string;
 }
 
-export function resolveTools(numbers: (number | null)[], hints: Map<number, Hint>, overrides: Record<string, ToolOverrideIn>): Map<number | null, ToolSpec> {
+export function resolveTools(numbers: (number | null)[], hints: Map<number | null, Hint>, overrides: Record<string, ToolOverrideIn>): Map<number | null, ToolSpec> {
   const tools = new Map<number | null, ToolSpec>();
   for (const n of numbers) {
     const key = n === null ? "none" : String(n);
@@ -117,7 +131,7 @@ export function resolveTools(numbers: (number | null)[], hints: Map<number, Hint
     if (o && Object.keys(o).length) {
       const t = o.type ?? "flat";
       spec = makeTool(n, t, o.diameter ?? 10, o.corner_radius ?? 0, o.point_angle ?? DEFAULT_POINT_ANGLE[t] ?? 118, "user", o.description ?? "");
-    } else if (n !== null && hints.has(n)) {
+    } else if (hints.has(n)) {
       const h = hints.get(n)!;
       const t = h.type ?? "flat";
       spec = makeTool(n, t, h.diameter ?? 10, h.corner_radius ?? 0, h.point_angle ?? DEFAULT_POINT_ANGLE[t] ?? 118, h.diameter !== undefined ? "comment" : "default", h.description ?? "");

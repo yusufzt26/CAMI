@@ -120,3 +120,20 @@ def test_assumed_tool_is_warned_and_overridable():
     r2 = verify(body, InterpreterSettings(), StockSetup(), {"7": {"type": "ball", "diameter": 6.0}})
     assert "TOOL_ASSUMED" not in codes(r2)
     assert r2["tools"][0]["type"] == "ball" and r2["tools"][0]["source"] == "user"
+
+
+def test_tool_from_header_comments_when_program_has_no_t_word():
+    from app.gcode.lexer import tokenize
+    from app.material_removal import resolve_tools, tool_hints_from_comments
+
+    text = (
+        "O0043(46)\n(Operation TYPE=Z-Level Finishing)\n(Tool Type : Bull-nose )\n"
+        "(TOOL DIA : 19.9 ,CORNER RAD : 0.8)\n(Recommended Safe Tool Length= 48.000 )\n"
+        "N1 (ToolDia:19.9,CornerRad:0.8)\nN3 G00 G91 G28 Z0.0\nN4 G05 P10000\nN8 G01 X0.5 Y-150. F8000\n"
+    )
+    hints = tool_hints_from_comments(tokenize(text))
+    spec = resolve_tools([None], hints, {})[None]
+    assert (spec.type, spec.diameter, spec.corner_radius, spec.source) == ("bull", 19.9, 0.8, "comment")
+
+    drill = tool_hints_from_comments(tokenize("(Tool Type : Centering Drill )\n(TOOL DIA : 6. ,CORNER RAD : 0.)\nG0 X0 Y0\n"))
+    assert resolve_tools([None], drill, {})[None].type == "spot"

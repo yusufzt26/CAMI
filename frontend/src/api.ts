@@ -1,5 +1,5 @@
 import { localAdd, localInterpret, localList } from "./localStore";
-import { type ProgramFile, readUpload } from "./programFiles";
+import { type ProgramFile, type StockHint, readUpload } from "./programFiles";
 import type { InterpretResponse, InterpreterSetup, ProgramMeta, StockSetup, ToolOverride } from "./types";
 
 /** Standalone preview build: everything runs in the browser, no backend. */
@@ -26,13 +26,13 @@ async function uploadOne(f: ProgramFile): Promise<ProgramMeta> {
   return f.source ? { ...meta, source: f.source } : meta;
 }
 
-/** Uploads a program, or every program inside a .zip. Returns them in archive order. */
-export async function uploadProgram(file: File): Promise<ProgramMeta[]> {
-  const files = await readUpload(file);
-  if (LOCAL_MODE) return localAdd(files);
-  const out: ProgramMeta[] = [];
-  for (const f of files) out.push(await uploadOne(f));
-  return out;
+/** Uploads a program, or every program inside a .zip (in archive order), plus any stock size found in the zip. */
+export async function uploadProgram(file: File): Promise<{ metas: ProgramMeta[]; stock?: StockHint }> {
+  const { files, stock } = await readUpload(file);
+  if (LOCAL_MODE) return { metas: localAdd(files), stock };
+  const metas: ProgramMeta[] = [];
+  for (const f of files) metas.push(await uploadOne(f));
+  return { metas, stock };
 }
 
 export async function listPrograms(): Promise<ProgramMeta[]> {
