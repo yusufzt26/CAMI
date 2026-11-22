@@ -1,24 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Diagnostic, InterpretResponse, Severity } from "../types";
-import { fmtDist, fmtTime } from "./format";
+import type { ProgramSetInfo, SetRow } from "../setRunner";
+import { STATUS_LABEL, fmtDist, fmtTime } from "./format";
 
 const ROW_H = 22;
-type Tab = "code" | "diag" | "summary";
+type Tab = "code" | "diag" | "summary" | "set";
+
+export interface ProgramSetView {
+  info: ProgramSetInfo;
+  rows: Map<number, SetRow>;
+  version: number;
+  carry: boolean;
+  onCarry: (on: boolean) => void;
+  onRunAll: () => void;
+  onOpen: (id: number) => void;
+  currentId: number | null;
+  busy: boolean;
+}
 
 interface Props {
+  programSet?: ProgramSetView | null;
   result: InterpretResponse | null;
   currentBlock: number | null;
   onSeekBlock: (block: number) => void;
 }
 
-export function BottomPanel({ result, currentBlock, onSeekBlock }: Props) {
+export function BottomPanel({ programSet, result, currentBlock, onSeekBlock }: Props) {
   const [tab, setTab] = useState<Tab>("code");
   const s = result?.summary;
   const diagCount = result ? result.diagnostics.filter((d) => d.severity !== "info").length : 0;
 
   useEffect(() => {
-    if (s?.status === "halted" || s?.status === "errors") setTab("diag");
-    else setTab("code");
+    // Stay on the program set table while stepping through its programs.
+    setTab((t) => (t === "set" ? t : s?.status === "halted" || s?.status === "errors" ? "diag" : "code"));
   }, [result, s?.status]);
 
   return (
@@ -33,9 +47,16 @@ export function BottomPanel({ result, currentBlock, onSeekBlock }: Props) {
         <button className={tab === "summary" ? "on" : ""} onClick={() => setTab("summary")}>
           Toolpath summary
         </button>
+        {programSet && (
+          <button className={tab === "set" ? "on" : ""} onClick={() => setTab("set")}>
+            Program set <span className="badge">{programSet.info.ids.length}</span>
+          </button>
+        )}
       </div>
       <div className="tab-body">
-        {!result ? (
+        {tab === "set" && programSet ? (
+          <SetTable set={programSet} />
+        ) : !result ? (
           <div className="placeholder">Program blocks, diagnostics and the toolpath summary appear here after upload.</div>
         ) : tab === "code" ? (
           <CodeList result={result} currentBlock={currentBlock} onSeekBlock={onSeekBlock} />
@@ -232,6 +253,62 @@ function SummaryView({ result }: { result: InterpretResponse }) {
             ))}
           </ul>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SetTable({ set }: { set: ProgramSetView }) {
+  const done = set.info.ids.filter((id) => set.rows.has(id)).length;
+  const total = set.info.ids.length;
+  const flagged = set.info.ids.filter((id) => (set.rows.get(id)?.errors ?? 0) > 0).length;
+  return (
+    <div className="set-wrap">
+      <div className="set-bar">
+        <div className="set-title">
+          <b>{set.info.name}</b> · {total} programs in name order · {done} simulated{done ? ` · ${flagged} with errors` : ""}
+        </div>
+        <label className="follow-inline" title="Each program starts from the stock the earlier programs of the set left">
+          <input type="checkbox" checked={set.carry} disabled={set.busy} onChange={(e) => set.onCarry(e.target.checked)} /> Carry stock between programs
+        </label>
+        <button className="btn primary" disabled={set.busy || done === total || !set.carry} onClick={set.onRunAll}>
+          {done === total ? "Whole set simulated" : done ? "Simulate the rest" : "Simulate whole set"}
+        </button>
+      </div>
+      <div className="set-scroll">
+        <table className="diag set-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Program</th>
+              <th>Tool</th>
+              <th>Status</th>
+              <th className="rt">Errors</th>
+              <th className="rt">Warnings</th>
+              <th className="rt">Rapids in stock</th>
+              <th className="rt">Removed cm³</th>
+              <th className="rt">Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {set.info.ids.map((id, i) => {
+              const r = set.rows.get(id);
+              return (
+                <tr key={id} className={id === set.currentId ? "current" : ""} onClick={() => !set.busy && set.onOpen(id)} title="Open this program">
+                  <td className="mono">{i + 1}</td>
+                  <td className="mono">{set.info.filenames[i]}</td>
+                  <td>{r?.tool ?? ""}</td>
+                  <td>{r ? <span className={`st-chip st-${r.status}`}>{STATUS_LABEL[r.status]}</span> : <span className="muted">not run</span>}</td>
+                  <td className={`rt ${r?.errors ? "err" : ""}`}>{r ? r.errors : ""}</td>
+                  <td className="rt">{r ? r.warnings : ""}</td>
+                  <td className={`rt ${r?.rapidInStock ? "err" : ""}`}>{r ? r.rapidInStock : ""}</td>
+                  <td className="rt">{r ? (r.removed / 1000).toFixed(1) : ""}</td>
+                  <td className="rt mono">{r ? fmtTime(r.time) : ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

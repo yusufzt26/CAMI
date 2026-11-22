@@ -1,4 +1,4 @@
-import { localAdd, localInterpret, localList } from "./localStore";
+import { localAdd, localClear, localInterpret, localList, localText } from "./localStore";
 import { type ProgramFile, type StockHint, readUpload } from "./programFiles";
 import type { InterpretResponse, InterpreterSetup, ProgramMeta, StockSetup, ToolOverride } from "./types";
 
@@ -61,4 +61,16 @@ export async function interpretProgram(id: number, job: JobSetup): Promise<Inter
       body: JSON.stringify(body),
     }),
   );
+}
+
+export async function getProgramText(id: number): Promise<string> {
+  if (LOCAL_MODE) return localText(id);
+  return (await handle<{ content: string }>(await fetch(`/api/programs/${id}`))).content;
+}
+
+/** Deletes every uploaded program (and its stored results). */
+export async function clearPrograms(): Promise<void> {
+  if (LOCAL_MODE) return localClear();
+  const res = await fetch("/api/programs", { method: "DELETE" });
+  if (!res.ok) throw new Error(`Clear failed (${res.status})`);
 }

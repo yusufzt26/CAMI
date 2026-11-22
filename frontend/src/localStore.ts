@@ -5,8 +5,7 @@
  */
 import demo from "../../samples/mould_plate_demo.nc?raw";
 import unsafe from "../../samples/unsafe_examples.nc?raw";
-import { defaultSettings } from "./engine/interpreter";
-import { verify } from "./engine/verify";
+import { runInBrowser } from "./engineRun";
 import type { ProgramFile } from "./programFiles";
 import type { InterpretResponse, ProgramMeta } from "./types";
 import type { JobSetup } from "./api";
@@ -94,9 +93,25 @@ export async function localInterpret(id: number, job: JobSetup): Promise<Interpr
   if (!p) throw new Error("Program not found");
   // Let the busy indicator paint before the (synchronous) verification runs.
   await new Promise((r) => setTimeout(r, 30));
-  const settings = { ...defaultSettings(), ...structuredClone(job.interpreter), comp_radii: new Map<number, number>() };
-  const res = verify(p.text, settings, job.stock, job.tools, { id: p.meta.id, filename: p.meta.filename });
+  const res = runInBrowser(p.text, job, { id: p.meta.id, filename: p.meta.filename });
   p.meta = { ...p.meta, last_status: res.summary.status };
   save();
   return res;
+}
+
+export function localText(id: number): string {
+  const p = all().find((x) => x.meta.id === id);
+  if (!p) throw new Error("Program not found");
+  return p.text;
+}
+
+/** Clear button: forget every uploaded program; the two samples come back. */
+export function localClear() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* storage blocked */
+  }
+  store = null;
+  all();
 }

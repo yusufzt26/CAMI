@@ -106,6 +106,16 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 
 Without `DATABASE_URL` the backend uses SQLite in `backend/data/`. Tests: `cd backend && ../.venv/bin/pytest`.
 
+### Program sets
+
+A .zip with several programs becomes a **program set**: the programs run in name order and each one
+starts from the stock the earlier ones left (Program set tab, "Simulate whole set"). Re-rough and finishing
+programs are then checked against the real remaining stock instead of a raw block. Surfaces cut by
+earlier programs are drawn grey. A WorkNC `bruts3d.dim` in the zip sets the stock block. Set simulation
+uses the browser engine (`src/setRunner.ts`); the Python engine takes the same start stock
+(`verify(..., start=previous["_zmap"])`). **Clear** removes all uploaded programs and resets the job setup
+(`DELETE /api/programs`).
+
 ### Browser-only preview
 
 `cd frontend && npm run build:preview` builds a version that needs no server: the TypeScript engine in

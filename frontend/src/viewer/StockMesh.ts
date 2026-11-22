@@ -4,6 +4,9 @@ import type { ZMap } from "../sim/zmap";
 /** Colours for surfaces cut by each tool. Red / yellow / green stay reserved for verification status. */
 export const TOOL_PALETTE = ["#3b82f6", "#f97316", "#14b8a6", "#a855f7", "#ec4899", "#0ea5e9", "#78716c", "#6366f1"];
 const STOCK_COLOR = new THREE.Color("#b7c0ca");
+/** Surfaces machined by earlier programs of a set. */
+export const EARLIER_COLOR = "#8a9aac";
+const EARLIER = new THREE.Color(EARLIER_COLOR);
 
 export function toolColor(tool: number | null): string {
   if (tool === null || tool < 0) return "#94a3b8";
@@ -124,7 +127,7 @@ export class StockMesh {
         this.nrm[k + 1] = nyv;
         this.nrm[k + 2] = 1 / len;
         const t = C[c];
-        const color = t < 0 ? STOCK_COLOR : this.palette[t % this.palette.length];
+        const color = t === -2 ? EARLIER : t < 0 ? STOCK_COLOR : this.palette[t % this.palette.length];
         this.col[k] = color.r;
         this.col[k + 1] = color.g;
         this.col[k + 2] = color.b;

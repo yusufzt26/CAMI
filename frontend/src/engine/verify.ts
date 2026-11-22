@@ -3,7 +3,7 @@
  * Port of backend app/verification.py and app/material_removal/simulate.py.
  */
 import type { Diagnostic, InterpretResponse, Move, StockGrid, StockSetup, ToolOverride, Vec3 } from "../types";
-import { ToolShape, ZMap } from "../sim/zmap";
+import { type StockState, ToolShape, ZMap } from "../sim/zmap";
 import { type InterpreterSettings, interpret } from "./interpreter";
 import { tokenize } from "./lexer";
 import { type ToolSpec, makeTool, normalised, resolveTools, toolHintsFromComments } from "./tools";
@@ -47,10 +47,11 @@ function volume(z: ZMap): number {
   return s * z.grid.cx * z.grid.cy;
 }
 
-function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, ToolSpec>) {
+function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, ToolSpec>, start?: StockState) {
   const [lo, hi] = stockBox(stock);
   const grid = gridForBox(lo, hi);
   const zm = new ZMap(grid, true);
+  if (start) zm.loadStart(start);
   const initial = volume(zm);
   const diags: Diagnostic[] = [];
   const counts = new Map<string, number>();
@@ -134,7 +135,7 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     rapid_in_stock_moves: rapidHits,
     lowest_point: Math.round(lowest * 1e4) / 1e4,
   };
-  return { grid, diags, stats };
+  return { grid, diags, stats, final: zm.state() };
 }
 
 export function verify(
@@ -143,7 +144,8 @@ export function verify(
   stock: StockSetup,
   overrides: Record<string, ToolOverride>,
   program: { id: number; filename: string },
-): InterpretResponse {
+  start?: StockState,
+): InterpretResponse & { finalStock: StockState } {
   const blocks = tokenize(text);
   const hints = toolHintsFromComments(blocks);
   const declared = new Set<number>();
@@ -167,7 +169,7 @@ export function verify(
         block: null,
         halt: false,
       });
-  const sim = simulate(result.moves, stock, tools);
+  const sim = simulate(result.moves, stock, tools, start);
   const diagnostics = [...result.diagnostics, ...extra, ...sim.diags];
   const summary = { ...result.summary };
   const sev = { error: 0, warning: 0, info: 0 };
@@ -181,6 +183,7 @@ export function verify(
     ...summary.limitations.filter((l) => !l.startsWith("Material removal")),
     `Material removal uses a ${cell.toFixed(2)} mm height grid: details smaller than this are approximated, and undercuts are not modelled.`,
   ];
+  if (start) summary.limitations.push("Stock starts from what the earlier programs of the set left (same stock grid).");
   if (extra.some((d) => d.code === "TOOL_ASSUMED")) summary.limitations.push("Some tool sizes were assumed, so the simulated stock may differ from the real part.");
   summary.stock = sim.stats;
   return {
@@ -191,5 +194,7 @@ export function verify(
     summary,
     tools: [...tools.entries()].map(([n, spec]) => ({ ...spec, key: n === null ? "none" : String(n) })),
     stock: sim.stats,
+    startStock: start,
+    finalStock: sim.final,
   };
 }

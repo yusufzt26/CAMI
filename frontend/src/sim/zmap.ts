@@ -8,6 +8,20 @@ import type { StockGrid, ToolInfo, Vec3 } from "../types";
 const CUT_TOLERANCE = 0.01;
 const RAMP_SAMPLES = 12;
 
+/** Stock left by earlier programs of a set (same grid). cutBy -2 = cut by an earlier program. */
+export interface StockState {
+  grid: StockGrid;
+  height: Float32Array | Float64Array;
+  cutBy: Int16Array;
+}
+
+/** cutBy value for cells cut by an earlier program in a set. */
+export const CUT_EARLIER = -2;
+
+export function sameGrid(a: StockGrid, b: StockGrid): boolean {
+  return a.nx === b.nx && a.ny === b.ny && Math.abs(a.x0 - b.x0) < 1e-9 && Math.abs(a.y0 - b.y0) < 1e-9 && Math.abs(a.cx - b.cx) < 1e-12 && Math.abs(a.cy - b.cy) < 1e-12 && a.top === b.top && a.bottom === b.bottom;
+}
+
 export interface DirtyRect {
   i0: number;
   i1: number;
@@ -79,6 +93,19 @@ export class ZMap {
     this.height.fill(this.grid.top);
     this.cutBy.fill(-1);
     this.markDirty({ i0: 0, i1: this.grid.nx, j0: 0, j1: this.grid.ny });
+  }
+
+  /** Start from the stock an earlier program left; its cut cells are marked CUT_EARLIER. */
+  loadStart(start: StockState) {
+    if (!sameGrid(start.grid, this.grid)) throw new Error("Stock grid changed between programs of the set");
+    this.height.set(start.height);
+    for (let i = 0; i < this.cutBy.length; i++) this.cutBy[i] = start.cutBy[i] === -1 ? -1 : CUT_EARLIER;
+    this.markDirty({ i0: 0, i1: this.grid.nx, j0: 0, j1: this.grid.ny });
+  }
+
+  /** Compact copy of the current stock to start the next program from. */
+  state(): StockState {
+    return { grid: this.grid, height: Float32Array.from(this.height), cutBy: this.cutBy.slice() };
   }
 
   snapshot(): { h: Float32Array | Float64Array; c: Int16Array } {

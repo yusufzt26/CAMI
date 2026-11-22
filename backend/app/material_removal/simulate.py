@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+
+import numpy as np
 from dataclasses import dataclass, field
 
 from ..gcode.model import Diagnostic
@@ -41,10 +43,19 @@ class StockResult:
     stats: dict = field(default_factory=dict)
 
 
-def simulate(moves: list[dict], stock: StockSetup, tools: dict[int | None, ToolSpec]) -> StockResult:
+CUT_EARLIER = -2  # cut_by value for cells machined by an earlier program of a set
+
+
+def simulate(moves: list[dict], stock: StockSetup, tools: dict[int | None, ToolSpec], start: ZMap | None = None) -> StockResult:
+    """start: the stock an earlier program of a set left (same stock setup), or None for a raw block."""
     lo, hi = stock_box(stock)
     grid = Grid.for_box(lo, hi)
     zm = ZMap(grid)
+    if start is not None:
+        if start.grid != grid:
+            raise ValueError("Stock setup changed between programs of the set")
+        zm.height[:] = start.height
+        zm.cut_by[:] = np.where(start.cut_by == -1, -1, CUT_EARLIER)
     initial = zm.stock_volume
     diags: list[Diagnostic] = []
     counts: Counter = Counter()

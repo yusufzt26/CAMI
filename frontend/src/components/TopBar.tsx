@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProgramMeta, Summary } from "../types";
 import { STATUS_LABEL } from "./format";
 
@@ -13,10 +13,18 @@ interface Props {
   onOpen: (id: number) => void;
   notice: string | null;
   onDismissNotice: () => void;
+  onClear: () => void;
 }
 
-export function TopBar({ programs, current, summary, busy, onUpload, onOpen, notice, onDismissNotice }: Props) {
+export function TopBar({ programs, current, summary, busy, onUpload, onOpen, notice, onDismissNotice, onClear }: Props) {
   const input = useRef<HTMLInputElement>(null);
+  // Two-step clear (the page cannot use confirm()): first click arms, second click clears.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
   return (
     <header className="topbar">
       <div className="brand">
@@ -46,6 +54,19 @@ export function TopBar({ programs, current, summary, busy, onUpload, onOpen, not
             e.target.value = "";
           }}
         />
+        <button
+          className={`btn ${armed ? "danger" : ""}`}
+          disabled={!!busy || (!current && programs.length === 0)}
+          title="Remove uploaded programs and results, and reset the job setup"
+          onClick={() => {
+            if (armed) {
+              setArmed(false);
+              onClear();
+            } else setArmed(true);
+          }}
+        >
+          {armed ? "Click again to clear" : "Clear"}
+        </button>
         <select
           className="select"
           value={current?.id ?? ""}

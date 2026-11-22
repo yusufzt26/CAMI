@@ -127,6 +127,8 @@ export interface StockStats {
 }
 
 export interface InterpretResponse {
+  /** Set simulation only (browser engine): stock this program started from. */
+  startStock?: import("./sim/zmap").StockState;
   program: { id: number; filename: string };
   blocks: BlockRow[];
   moves: Move[];

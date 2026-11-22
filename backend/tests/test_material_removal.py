@@ -137,3 +137,36 @@ def test_tool_from_header_comments_when_program_has_no_t_word():
 
     drill = tool_hints_from_comments(tokenize("(Tool Type : Centering Drill )\n(TOOL DIA : 6. ,CORNER RAD : 0.)\nG0 X0 Y0\n"))
     assert resolve_tools([None], drill, {})[None].type == "spot"
+
+
+def test_set_carries_stock_between_programs():
+    from app.gcode import InterpreterSettings
+    from app.material_removal import StockSetup
+    from app.verification import verify
+
+    stock = StockSetup(size=(100.0, 100.0, 20.0))
+    rough = "(T1 D10 FLAT END MILL)\nG90 G17 G21 G54\nT1 M06\nS1000 M03\nG0 G43 H1 X-20. Y0 Z5.\nG1 Z-5. F500.\nX20.\nG0 Z5.\nM30\n"
+    # Second program rapids down into the slot the first one cut.
+    finish = "(T2 D8 FLAT END MILL)\nG90 G17 G21 G54\nT2 M06\nS1000 M03\nG0 G43 H2 X0 Y0 Z5.\nG0 Z-4.\nG1 Z-6. F300.\nG0 Z5.\nM30\n"
+    alone = verify(finish, InterpreterSettings(), stock, {})
+    assert any(d["code"] == "RAPID_IN_STOCK" for d in alone["diagnostics"])
+    first = verify(rough, InterpreterSettings(), stock, {})
+    after = verify(finish, InterpreterSettings(), stock, {}, start=first["_zmap"])
+    assert not any(d["code"] == "RAPID_IN_STOCK" for d in after["diagnostics"])
+    assert 0 < after["stock"]["removed_volume"] < alone["stock"]["removed_volume"]
+
+
+def test_clear_endpoint_removes_all_programs():
+    import os
+    import tempfile
+
+    os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.mkdtemp()}/t.db")
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        client.post("/api/programs", files={"file": ("a.nc", b"G0 X1.\nM30\n", "text/plain")})
+        assert client.get("/api/programs").json()
+        assert client.delete("/api/programs").status_code == 204
+        assert client.get("/api/programs").json() == []

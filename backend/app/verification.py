@@ -14,7 +14,8 @@ from .gcode.model import Diagnostic
 from .material_removal import StockSetup, resolve_tools, simulate, tool_hints_from_comments
 
 
-def verify(text: str, settings: InterpreterSettings, stock: StockSetup, tool_overrides: dict[str, dict]) -> dict:
+def verify(text: str, settings: InterpreterSettings, stock: StockSetup, tool_overrides: dict[str, dict], start=None) -> dict:
+    """start: ZMap left by the previous program of a set (result["_zmap"] of that run), or None."""
     blocks = tokenize(text)
     hints = tool_hints_from_comments(blocks)
     # Cutter compensation needs tool radii before interpretation: D<n> is taken as the radius of T<n>.
@@ -40,7 +41,7 @@ def verify(text: str, settings: InterpreterSettings, stock: StockSetup, tool_ove
                 )
             )
 
-    stock_result = simulate(result.moves, stock, tools)
+    stock_result = simulate(result.moves, stock, tools, start)
     diagnostics = result.diagnostics + [d.to_dict() for d in extra + stock_result.diagnostics]
 
     summary = dict(result.summary)
@@ -52,6 +53,8 @@ def verify(text: str, settings: InterpreterSettings, stock: StockSetup, tool_ove
     summary["limitations"] = [
         lim for lim in summary["limitations"] if not lim.startswith("Material removal")
     ] + [f"Material removal uses a {cell:.2f} mm height grid: details smaller than this are approximated, and undercuts are not modelled."]
+    if start is not None:
+        summary["limitations"].append("Stock starts from what the earlier programs of the set left (same stock grid).")
     if any(d.code == "TOOL_ASSUMED" for d in extra):
         summary["limitations"].append("Some tool sizes were assumed, so the simulated stock may differ from the real part.")
     summary["stock"] = stock_result.stats
@@ -66,4 +69,5 @@ def verify(text: str, settings: InterpreterSettings, stock: StockSetup, tool_ove
             {**spec.to_dict(), "key": "none" if n is None else str(n)} for n, spec in tools.items()
         ],
         "stock": stock_result.stats,
+        "_zmap": stock_result.zmap,  # not serialised by the API; start stock for the next program of a set
     }

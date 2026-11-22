@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LOCAL_MODE, interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
+import { LOCAL_MODE, clearPrograms, getProgramText, interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
+import { type ProgramSetInfo, SetRunner } from "./setRunner";
 import { BottomPanel } from "./components/BottomPanel";
 import { JobSetupPanel } from "./components/JobSetupPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -31,6 +32,14 @@ export default function App() {
   const [appliedJob, setAppliedJob] = useState<JobSetup>(job);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Program set (all programs of one zip, run in order with the stock carried over).
+  const [programSet, setProgramSet] = useState<ProgramSetInfo | null>(null);
+  const [carry, setCarry] = useState(true);
+  const [setVersion, setSetVersion] = useState(0);
+  const runnerRef = useRef<SetRunner | null>(null);
+  const carryRef = useRef(true);
+  carryRef.current = carry;
 
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(10);
@@ -84,7 +93,18 @@ export default function App() {
     setError(null);
     setPlaying(false);
     try {
-      const res = await interpretProgram(prog.id, j);
+      const runner = runnerRef.current;
+      const idx = runner && carryRef.current ? runner.indexOf(prog.id) : -1;
+      let res: InterpretResponse;
+      if (runner && idx >= 0) {
+        // Set mode: earlier programs of the set run first so this one starts from their stock.
+        const n = runner.info.ids.length;
+        res = await runner.run(idx, j, getProgramText, (i) => setBusy(`Simulating the set: ${i + 1} / ${n} · ${runner.info.filenames[i]} (stock carried over)…`));
+        setBusy(`Simulating ${prog.filename} (${idx + 1} / ${n} in the set)…`);
+        setSetVersion((v) => v + 1);
+      } else {
+        res = await interpretProgram(prog.id, j);
+      }
       setResult(res);
       setAppliedJob(j);
       setPrograms(await listPrograms());
@@ -99,7 +119,7 @@ export default function App() {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    scene.setProgram(timeline, result ? { grid: result.stock.grid, tools: result.tools } : undefined);
+    scene.setProgram(timeline, result ? { grid: result.stock.grid, tools: result.tools, start: result.startStock } : undefined);
     const halted = result?.summary.halted_at_block != null && timeline && !timeline.empty;
     scene.setHaltMarker(halted ? timeline!.moves[timeline!.moves.length - 1].end : null);
     timeRef.current = 0;
@@ -120,7 +140,15 @@ export default function App() {
         const { metas, stock: found } = await uploadProgram(file);
         let j = job;
         const notes: string[] = [];
-        if (metas.length > 1) notes.push(`${metas.length} programs found in ${file.name}. Showing ${metas[0].filename}; pick another from the program list.`);
+        if (metas.length > 1) {
+          const info: ProgramSetInfo = { name: file.name, ids: metas.map((m) => m.id), filenames: metas.map((m) => m.filename) };
+          runnerRef.current = new SetRunner(info);
+          setProgramSet(info);
+          setSetVersion((v) => v + 1);
+          notes.push(
+            `${metas.length} programs found in ${file.name}. They form a program set: each one starts from the stock the earlier ones left (Program set tab). Showing ${metas[0].filename}.`,
+          );
+        }
         if (found) {
           const next: StockSetup = { ...stock, size: found.size, origin: found.origin, topZ: found.topZ, allowance: 0 };
           setStock(next);
@@ -137,6 +165,55 @@ export default function App() {
     },
     [runInterpretation, job, stock],
   );
+
+  const openById = (id: number) => {
+    const meta = programs.find((p) => p.id === id);
+    if (!meta) return;
+    setCurrent(meta);
+    runInterpretation(meta, job);
+  };
+
+  const runWholeSet = async () => {
+    const runner = runnerRef.current;
+    if (!runner || busy) return;
+    const n = runner.info.ids.length;
+    setError(null);
+    setPlaying(false);
+    try {
+      await runner.runAll(job, getProgramText, (i) => {
+        setBusy(`Simulating the set: ${i + 1} / ${n} · ${runner.info.filenames[i]}…`);
+        setSetVersion((v) => v + 1);
+      });
+      setAppliedJob(job);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+      setSetVersion((v) => v + 1);
+    }
+  };
+
+  const onClear = async () => {
+    setPlaying(false);
+    try {
+      await clearPrograms();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    runnerRef.current = null;
+    setProgramSet(null);
+    setCurrent(null);
+    setResult(null);
+    setNotice(null);
+    setError(null);
+    const fresh = { interpreter: defaultInterpreterSetup(), stock: defaultStock(), tools: {} };
+    setSetup(fresh.interpreter);
+    setStock(fresh.stock);
+    setToolOverrides({});
+    setAppliedJob(fresh);
+    setPrograms(await listPrograms().catch(() => []));
+  };
 
   const onOpenProgram = useCallback(
     (id: number) => {
@@ -169,7 +246,7 @@ export default function App() {
       sceneRef.current = scene;
       if (scene) {
         scene.setStock(stock);
-        scene.setProgram(timeline, result ? { grid: result.stock.grid, tools: result.tools } : undefined);
+        scene.setProgram(timeline, result ? { grid: result.stock.grid, tools: result.tools, start: result.startStock } : undefined);
         scene.setTime(timeRef.current);
         scene.setView("iso");
       }
@@ -209,6 +286,7 @@ export default function App() {
         onOpen={onOpenProgram}
         notice={notice}
         onDismissNotice={() => setNotice(null)}
+        onClear={onClear}
       />
       <div className="workspace">
         <JobSetupPanel
@@ -282,6 +360,25 @@ export default function App() {
         />
       </div>
       <BottomPanel
+        programSet={
+          programSet && runnerRef.current
+            ? {
+                info: programSet,
+                rows: runnerRef.current.rows,
+                version: setVersion,
+                carry,
+                onCarry: (on: boolean) => {
+                  carryRef.current = on;
+                  setCarry(on);
+                  if (current) runInterpretation(current, job);
+                },
+                onRunAll: runWholeSet,
+                onOpen: openById,
+                currentId: current?.id ?? null,
+                busy: !!busy,
+              }
+            : null
+        }
         result={result}
         currentBlock={state?.move.block ?? null}
         onSeekBlock={(block) => {

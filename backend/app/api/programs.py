@@ -119,6 +119,14 @@ def get_program(program_id: int, db: Session = Depends(get_session)):
     return _get(db, program_id)
 
 
+@router.delete("/programs", status_code=204)
+def clear_programs(db: Session = Depends(get_session)):
+    """Clear button: delete every uploaded program and its results."""
+    for prog in db.scalars(select(Program)).all():
+        db.delete(prog)
+    db.commit()
+
+
 @router.delete("/programs/{program_id}", status_code=204)
 def delete_program(program_id: int, db: Session = Depends(get_session)):
     db.delete(_get(db, program_id))
@@ -141,6 +149,7 @@ def interpret_program(program_id: int, setup: SetupIn, db: Session = Depends(get
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    result.pop("_zmap", None)
     prog.last_status = result["summary"]["status"]
     db.commit()
     return {"program": {"id": prog.id, "filename": prog.filename}, **result}

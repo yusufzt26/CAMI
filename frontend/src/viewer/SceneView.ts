@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { StockPlayback } from "../sim/stockPlayback";
+import type { StockState } from "../sim/zmap";
 import type { Timeline } from "../sim/timeline";
 import { ToolShape } from "../sim/zmap";
 import type { Move, StockGrid, StockSetup, ToolInfo, Vec3 } from "../types";
@@ -224,7 +225,7 @@ export class SceneView {
   }
 
   // ----------------------------------------------------------- toolpath
-  setProgram(timeline: Timeline | null, stock?: { grid: StockGrid; tools: ToolInfo[] }) {
+  setProgram(timeline: Timeline | null, stock?: { grid: StockGrid; tools: ToolInfo[]; start?: StockState }) {
     this.timeline = timeline;
     this.tools = new Map((stock?.tools ?? []).map((t) => [t.key, t]));
     this.currentToolKey = "";
@@ -233,7 +234,7 @@ export class SceneView {
     this.stockMesh = null;
     this.stockPlayback = null;
     if (timeline && !timeline.empty && stock?.grid) {
-      this.stockPlayback = new StockPlayback(timeline, stock.grid, stock.tools);
+      this.stockPlayback = new StockPlayback(timeline, stock.grid, stock.tools, stock.start);
       this.stockMesh = new StockMesh(this.stockPlayback.zmap);
       this.materialGroup.add(this.stockMesh.group);
     }
