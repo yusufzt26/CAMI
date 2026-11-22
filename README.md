@@ -4,12 +4,12 @@ Browser-based verification software for 3-axis VMC programs. A CAM programmer up
 program, the backend interprets it like a FANUC controller would, and the browser plays the
 toolpath back in 3D with a DRO, block list and diagnostics, before the program goes to the machine.
 
-The software is being built in phases. **This is Phase 1.**
+The software is being built in phases. **Phases 1 and 2 are built.**
 
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | G-code upload, FANUC interpreter, toolpath visualization, basic 3-axis simulation | **Done** |
-| 2 | Real 3D material removal for milling and drilling | Planned |
+| 2 | Real 3D material removal for milling and drilling, G41/G42 cutter compensation | **Done** |
 | 3 | Tool library, tool holders, vice and fixture setup, STEP/STL import | Planned |
 | 4 | Machine configuration, travel limits, collision detection | Planned |
 | 5 | Machining analysis, PDF / Excel verification reports | Planned |
@@ -34,8 +34,26 @@ The software is being built in phases. **This is Phase 1.**
   timeline scrubbing, click a block to jump to it, live DRO (X Y Z, T, S, F, coolant, mode).
 - **Summary**: estimated cycle time (cutting, rapid, tool change), distances, tool changes, holes, per-tool cut
   length/time, cutting extents.
-- The status panel never claims full verification: material removal, tool/fixture geometry, machine limits
-  and collisions are listed as *not checked* until their phases are built.
+- The status panel never claims full verification: tool/fixture geometry, machine limits and collisions are
+  listed as *not checked* until their phases are built.
+
+## What Phase 2 adds
+
+- **Material removal** (`backend/app/material_removal`): a Z-map (height-field) stock model, the standard model for
+  3-axis work. Cutter shapes: flat, ball nose, bull nose (corner radius), face mill, drill and spot drill (point
+  angle), reamer, tap, counterbore. Up to 160 000 cells (about 0.43 mm on a 200 × 150 block).
+- The browser runs the same algorithm (`frontend/src/sim/zmap.ts`) so the stock is **cut live during playback**,
+  coloured by the tool that cut each surface. Scrubbing backwards restores checkpoints, so any point in the program
+  can be inspected. The browser result matches the backend exactly (checked on the demo program).
+- **Tool sizes from CAM comments**: `(T2 D16 FLAT END MILL)`, `(T1 D=10. CR=1. - BULL)`, `T4 M06 (M12 X 1.75 TAP)`.
+  Tools without a size are flagged and can be set in the tool panel.
+- **New checks**: rapid (G00) moves that cut material (error), cutting material with the spindle stopped (error), tool tip
+  below the stock bottom (warning), assumed tool sizes (warning). Summary adds removed volume, volume per tool,
+  air-cutting time and deepest point.
+- **G41/G42 cutter radius compensation** in the XY plane: FANUC type A start-up, intersection at inside corners,
+  arcs at outside corners, offset arcs, Z moves inside compensation, alarm when the radius is too large for an
+  inside arc or corner. The D value is taken as the radius of the tool with the same number, or set to
+  *wear only* when the CAM output is already the cutter centre path.
 
 ## Architecture
 
@@ -46,12 +64,14 @@ backend/app/
     controllers/      dialect tables: fanuc.py now; Siemens / Mitsubishi plug in here
     interpreter.py    modal state machine -> motion list + diagnostics
     geometry.py       arcs, dog-leg rapids
-  material_removal/   stock removal engine (Phase 2, empty)
+    cutter_comp.py    G41/G42 offset path
+  material_removal/   Z-map stock engine, cutter profiles, tool hints from comments (Phase 2)
   collision/          collision engine (Phase 4, empty)
   api/programs.py     REST API
   db.py               SQLAlchemy models (PostgreSQL in production, SQLite for local dev)
 frontend/src/
   sim/timeline.ts     time -> machine state (kinematics only)
+  sim/zmap.ts         browser copy of the Z-map engine; stockPlayback.ts keeps it in step with playback
   viewer/SceneView.ts Three.js scene, independent of React
   components/         light industrial UI: job setup (left), verification/tools/machine (right),
                       G-code blocks / diagnostics / summary (bottom)

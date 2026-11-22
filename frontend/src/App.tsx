@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { interpretProgram, listPrograms, uploadProgram } from "./api";
+import { interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
 import { BottomPanel } from "./components/BottomPanel";
 import { JobSetupPanel } from "./components/JobSetupPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -15,6 +15,7 @@ import {
   type InterpreterSetup,
   type ProgramMeta,
   type StockSetup,
+  type ToolOverride,
 } from "./types";
 
 const UI_REFRESH_MS = 80;
@@ -24,9 +25,10 @@ export default function App() {
   const [current, setCurrent] = useState<ProgramMeta | null>(null);
   const [result, setResult] = useState<InterpretResponse | null>(null);
   const [setup, setSetup] = useState<InterpreterSetup>(defaultInterpreterSetup);
-  const [appliedSetup, setAppliedSetup] = useState<InterpreterSetup>(defaultInterpreterSetup);
   const [stock, setStock] = useState<StockSetup>(defaultStock);
-  const [toolDiameters, setToolDiameters] = useState<Record<string, number>>({});
+  const [toolOverrides, setToolOverrides] = useState<Record<string, ToolOverride>>({});
+  const job: JobSetup = useMemo(() => ({ interpreter: setup, stock, tools: toolOverrides }), [setup, stock, toolOverrides]);
+  const [appliedJob, setAppliedJob] = useState<JobSetup>(job);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,14 +81,14 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [playing, speed, timeline]);
 
-  const runInterpretation = useCallback(async (prog: ProgramMeta, s: InterpreterSetup) => {
-    setBusy("Interpreting program…");
+  const runInterpretation = useCallback(async (prog: ProgramMeta, j: JobSetup) => {
+    setBusy("Interpreting program and simulating stock…");
     setError(null);
     setPlaying(false);
     try {
-      const res = await interpretProgram(prog.id, s);
+      const res = await interpretProgram(prog.id, j);
       setResult(res);
-      setAppliedSetup(s);
+      setAppliedJob(j);
       setPrograms(await listPrograms());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -99,7 +101,7 @@ export default function App() {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    scene.setProgram(timeline);
+    scene.setProgram(timeline, result ? { grid: result.stock.grid, tools: result.tools } : undefined);
     const halted = result?.summary.halted_at_block != null && timeline && !timeline.empty;
     scene.setHaltMarker(halted ? timeline!.moves[timeline!.moves.length - 1].end : null);
     timeRef.current = 0;
@@ -112,11 +114,6 @@ export default function App() {
     sceneRef.current?.setStock(stock);
   }, [stock]);
 
-  useEffect(() => {
-    sceneRef.current?.setToolDiameters(toolDiameters);
-    sceneRef.current?.setTime(timeRef.current);
-  }, [toolDiameters]);
-
   const onUpload = useCallback(
     async (file: File) => {
       setBusy(`Uploading ${file.name}…`);
@@ -124,13 +121,13 @@ export default function App() {
       try {
         const meta = await uploadProgram(file);
         setCurrent(meta);
-        await runInterpretation(meta, setup);
+        await runInterpretation(meta, job);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setBusy(null);
       }
     },
-    [runInterpretation, setup],
+    [runInterpretation, job],
   );
 
   const onOpenProgram = useCallback(
@@ -138,9 +135,9 @@ export default function App() {
       const meta = programs.find((p) => p.id === id);
       if (!meta) return;
       setCurrent(meta);
-      runInterpretation(meta, setup);
+      runInterpretation(meta, job);
     },
-    [programs, runInterpretation, setup],
+    [programs, runInterpretation, job],
   );
 
   const onSceneReady = useCallback(
@@ -148,8 +145,7 @@ export default function App() {
       sceneRef.current = scene;
       if (scene) {
         scene.setStock(stock);
-        scene.setToolDiameters(toolDiameters);
-        scene.setProgram(timeline);
+        scene.setProgram(timeline, result ? { grid: result.stock.grid, tools: result.tools } : undefined);
         scene.setTime(timeRef.current);
         scene.setView("iso");
       }
@@ -160,7 +156,8 @@ export default function App() {
   );
 
   const state = timeline && !timeline.empty ? timeline.stateAt(uiTime) : null;
-  const setupDirty = JSON.stringify(setup) !== JSON.stringify(appliedSetup);
+  const setupDirty = JSON.stringify(job) !== JSON.stringify(appliedJob);
+  const apply = () => current && runInterpretation(current, job);
 
   const step = (dir: 1 | -1) => {
     if (!timeline || timeline.empty) return;
@@ -195,7 +192,7 @@ export default function App() {
           onSetup={setSetup}
           dirty={setupDirty}
           canApply={!!current && !busy}
-          onApply={() => current && runInterpretation(current, setup)}
+          onApply={apply}
         />
         <main className="center">
           <Viewport
@@ -209,6 +206,7 @@ export default function App() {
             state={state}
             onView={(v) => sceneRef.current?.setView(v)}
             onZoom={(f) => sceneRef.current?.zoom(f)}
+            onLayer={(layer, on) => sceneRef.current?.setLayerVisible(layer, on)}
           />
           <PlaybackBar
             disabled={!timeline || timeline.empty}
@@ -241,9 +239,19 @@ export default function App() {
         </main>
         <RightPanel
           result={result}
-          setup={appliedSetup}
-          toolDiameters={toolDiameters}
-          onToolDiameter={(tool, d) => setToolDiameters((m) => ({ ...m, [tool]: d }))}
+          setup={appliedJob.interpreter}
+          overrides={toolOverrides}
+          onOverride={(key, o) =>
+            setToolOverrides((m) => {
+              const next = { ...m };
+              if (o) next[key] = o;
+              else delete next[key];
+              return next;
+            })
+          }
+          dirty={setupDirty}
+          canApply={!!current && !busy}
+          onApply={apply}
           activeTool={state?.move.tool ?? null}
         />
       </div>

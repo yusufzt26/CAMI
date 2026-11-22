@@ -79,6 +79,51 @@ export interface Summary {
   warnings: number;
   infos: number;
   final_units: string;
+  stock?: StockStats;
+}
+
+export type ToolType = "flat" | "ball" | "bull" | "face" | "drill" | "spot" | "reamer" | "tap" | "counterbore";
+
+export interface ToolInfo {
+  key: string;
+  number: number | null;
+  type: ToolType | string;
+  diameter: number;
+  corner_radius: number;
+  point_angle: number;
+  source: "default" | "comment" | "user" | string;
+  description: string;
+}
+
+export interface ToolOverride {
+  type: ToolType;
+  diameter: number;
+  corner_radius: number;
+}
+
+export interface StockGrid {
+  x0: number;
+  y0: number;
+  nx: number;
+  ny: number;
+  cx: number;
+  cy: number;
+  top: number;
+  bottom: number;
+}
+
+export interface StockStats {
+  grid: StockGrid;
+  material: string;
+  initial_volume: number;
+  final_volume: number;
+  removed_volume: number;
+  removed_by_tool: { tool: number | null; volume: number }[];
+  time_in_material: number;
+  time_air_cutting: number;
+  air_cutting_percent: number;
+  rapid_in_stock_moves: number;
+  lowest_point: number;
 }
 
 export interface InterpretResponse {
@@ -87,6 +132,8 @@ export interface InterpretResponse {
   moves: Move[];
   diagnostics: Diagnostic[];
   summary: Summary;
+  tools: ToolInfo[];
+  stock: StockStats;
 }
 
 export interface ProgramMeta {
@@ -113,6 +160,7 @@ export interface InterpreterSetup {
   decimal_mode: "calculator" | "least_increment";
   rapid_mode: "linear" | "dogleg";
   block_delete_switch: boolean;
+  cutter_comp_mode: "tool_radius" | "zero";
 }
 
 export type StockOrigin =
@@ -142,6 +190,7 @@ export const defaultInterpreterSetup = (): InterpreterSetup => ({
   decimal_mode: "calculator",
   rapid_mode: "linear",
   block_delete_switch: false,
+  cutter_comp_mode: "tool_radius",
 });
 
 export const defaultStock = (): StockSetup => ({

@@ -17,6 +17,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from .controllers import ControllerDialect, Support, get_dialect
+from .cutter_comp import CompError, CutterComp, Element
 from .geometry import (
     ArcError,
     PLANE_AXES,
@@ -112,6 +113,10 @@ class Interpreter:
         self._no_decimal: list[int] = []
         self._tool_needs_g43: set[int] = set()
         self.executed_blocks = 0
+        self.tool_pos: list[float] = list(self.settings.reference_position)
+        self._st: State | None = None
+        self.comp = CutterComp(self._comp_line, self._comp_arc, self.settings.chord_tolerance)
+        self._comp_used = False
 
     # ------------------------------------------------------------------ utils
     def diag(self, severity, code, message, block: Block | None = None, halt=False, once_key=None):
@@ -171,6 +176,7 @@ class Interpreter:
         blocks = tokenize(text)
         s = self.settings
         st = State(pos=list(s.reference_position), units=s.initial_units)
+        self._st = st
         block_status: dict[int, str] = {}
         for block in blocks:
             if st.ended:
@@ -193,6 +199,11 @@ class Interpreter:
                 block_status[block.index] = "halted"
                 self.halted_at = block.index
                 break
+        if self.halted_at is None:
+            try:
+                self.comp.cancel()
+            except CompError:
+                pass
         if self.halted_at is not None:
             for b in blocks[self.halted_at + 1 :]:
                 block_status[b.index] = "not_run"
@@ -229,6 +240,7 @@ class Interpreter:
             "decimal_mode": s.decimal_mode,
             "rapid_mode": s.rapid_mode,
             "block_delete_switch": s.block_delete_switch,
+            "cutter_comp_mode": s.cutter_comp_mode,
         }
 
     # ---------------------------------------------------------------- blocks
@@ -389,6 +401,7 @@ class Interpreter:
                 )
 
         motion_code = groups.get("motion")
+        comp_startup = comp_cancel = False
         if "cutter_comp" in groups:
             new_comp = groups["cutter_comp"]
             eff_motion = motion_code or st.motion
@@ -406,14 +419,13 @@ class Interpreter:
                     st.d_offset = int(seen_letters["D"].value)
                 elif st.d_offset is None:
                     self.diag("warning", "COMP_NO_D", f"{new_comp} without a D offset number.", block)
-                self.diag(
-                    "warning",
-                    "CUTTER_COMP",
-                    f"{new_comp} active (D{st.d_offset if st.d_offset is not None else '?'}): the programmed path is shown. "
-                    "The real cutter centre is offset by the D radius, which is not simulated in this phase.",
-                    block,
-                    once_key=f"comp:{block.index}",
-                )
+                if new_comp != st.cutter_comp:
+                    if st.plane != "G17":
+                        self.diag("error", "COMP_PLANE", f"{new_comp} in {st.plane} is not supported yet (XY plane only). Verification stopped.", block, halt=True)
+                    self._comp_engage(block, st, new_comp)
+                    comp_startup = self.comp.active
+            elif new_comp == "G40" and st.cutter_comp != "G40":
+                comp_cancel = True
             st.cutter_comp = new_comp
         elif "D" in seen_letters:
             st.d_offset = int(seen_letters["D"].value)
@@ -483,6 +495,13 @@ class Interpreter:
                     block,
                 )
 
+        xy_motion = self._has_axes(seen_letters, include_arc=True) and not ("G28" in g_codes or "G53" in g_codes or st.cycle)
+        if self.comp.active and (comp_cancel and not xy_motion):
+            self._comp_safe(block, self.comp.cancel)
+        elif self.comp.active and not xy_motion and (("G28" in g_codes) or ("G53" in g_codes) or st.cycle):
+            self._comp_safe(block, self.comp.flush)
+            self.diag("warning", "COMP_SUSPENDED", "Reference return / canned cycle with cutter compensation active: compensation is suspended for this block.", block)
+
         if "G28" in g_codes:
             self._reference_return(block, st, seen_letters)
         elif "G53" in g_codes:
@@ -494,7 +513,7 @@ class Interpreter:
             # Cycle defined without a hole position: just store the parameters.
             self._update_cycle_params(block, st, seen_letters)
         elif self._has_axes(seen_letters, include_arc=True):
-            self._motion(block, st, seen_letters)
+            self._motion(block, st, seen_letters, comp_startup, comp_cancel)
 
         self._stops(block, st, groups)
         return True
@@ -550,9 +569,11 @@ class Interpreter:
                 note=note,
             )
         )
+        if kind in ("rapid", "feed", "arc"):
+            self.tool_pos = list(end)
 
     def _rapid(self, block, st, target, op="position", note=None):
-        start = list(st.pos)
+        start = list(self.tool_pos)
         if math.dist(start, target) < 1e-9:
             return
         dmax = max(abs(target[i] - start[i]) for i in range(3))
@@ -617,7 +638,71 @@ class Interpreter:
                 block,
             )
 
-    def _motion(self, block, st, letters):
+    # -------------------------------------------------- cutter compensation
+    def _comp_radius(self, block, st) -> float:
+        if self.settings.cutter_comp_mode == "zero":
+            return 0.0
+        d = st.d_offset
+        if d is None or d == 0:
+            return 0.0
+        r = self.settings.comp_radii.get(d)
+        if r is None:
+            self.diag(
+                "warning",
+                "COMP_D_UNKNOWN",
+                f"D{d} has no matching tool T{d} in the tool table, so its radius is unknown. The programmed path is used.",
+                block,
+                once_key=f"comp_d:{d}",
+            )
+            return 0.0
+        return r
+
+    def _comp_engage(self, block, st, code):
+        self._comp_safe(block, self.comp.flush)
+        radius = self._comp_radius(block, st)
+        self._comp_used = True
+        if radius <= 0:
+            self.comp.engage(0, 0.0)
+            if self.settings.cutter_comp_mode == "zero":
+                self.diag("info", "CUTTER_COMP", f"{code}: simulated with D = 0 (wear-only setting): the program path is the cutter centre.", block, once_key="comp_zero")
+            return
+        self.comp.engage(1 if code == "G41" else -1, radius)
+        self.diag(
+            "warning",
+            "CUTTER_COMP",
+            f"{code} D{st.d_offset}: the cutter centre is offset by {radius:.3f} mm (radius of T{st.d_offset} in the tool table). "
+            f"If D{st.d_offset} on the machine holds only wear because the CAM output is already the cutter centre path, "
+            "set 'Cutter comp D value' to 'Wear only' in Job Setup.",
+            block,
+            once_key="comp_on",
+        )
+
+    def _comp_safe(self, block, fn, *args):
+        try:
+            fn(*args)
+        except CompError as exc:
+            self.diag("error", "COMP_ERROR", f"{exc} Verification stopped.", block, halt=True)
+        for blk, code, msg in self.comp.warnings:
+            self.diag("error", code, msg, blk)
+        self.comp.warnings.clear()
+
+    def _comp_line(self, block, kind, start, end, feed):
+        st = self._st
+        length = math.dist(start, end)
+        if length < 1e-9:
+            return
+        if kind == "rapid":
+            dmax = max(abs(end[i] - start[i]) for i in range(3))
+            self._emit("rapid", "position", block, start, end, dmax / self.settings.rapid_rate * 60.0, length, st, feed=self.settings.rapid_rate, note="cutter comp")
+        else:
+            self._emit("feed", "mill", block, start, end, length / feed * 60.0, length, st, feed=feed, note="cutter comp")
+
+    def _comp_arc(self, block, start, end, center, cw, feed, points, length):
+        st = self._st
+        r = math.hypot(start[0] - center[0], start[1] - center[1])
+        self._emit("arc", "mill", block, start, end, length / feed * 60.0, length, st, feed=feed, points=points, note=f"{'CW' if cw else 'CCW'} R{r:.3f} (comp)")
+
+    def _motion(self, block, st, letters, comp_startup=False, comp_cancel=False):
         mode = st.motion
         if mode is None:
             self.diag(
@@ -630,6 +715,34 @@ class Interpreter:
             mode = st.motion = "G0"
         target = self._target(block, st, letters)
         start = list(st.pos)
+        if comp_cancel and self.comp.active:
+            # The element before G40 ends on its own normal; this move then goes to the programmed point.
+            self._comp_safe(block, self.comp.cancel)
+        if self.comp.active and mode in ("G0", "G1"):
+            if mode == "G0":
+                self._check_startup(block)
+                feed = None
+            else:
+                feed = self._feed_rate(block, st)
+                self._cut_checks(block, st)
+            self._z_checks(block, st, start, target)
+            if math.hypot(target[0] - start[0], target[1] - start[1]) < 1e-9:
+                if abs(target[2] - start[2]) > 1e-9:
+                    kind = "rapid" if mode == "G0" else "feed"
+                    z = target[2]
+                    blk = block
+
+                    def zmove(kind=kind, z=z, blk=blk, feed=feed):
+                        p = list(self.tool_pos)
+                        self._comp_line(blk, kind, p, [p[0], p[1], z], feed)
+
+                    if not self.comp.queue(zmove):
+                        zmove()
+            else:
+                el = Element("line", "rapid" if mode == "G0" else "feed", start, target, block, feed, startup=comp_startup)
+                self._comp_safe(block, self.comp.add, el, self.tool_pos[:2])
+            st.pos = target
+            return
         if mode == "G0":
             self._check_startup(block)
             self._z_checks(block, st, start, target)
@@ -641,6 +754,7 @@ class Interpreter:
         if feed > self.settings.max_feed:
             self.diag("warning", "FEED_HIGH", f"Feed {feed:.0f} mm/min exceeds the configured maximum {self.settings.max_feed:.0f}.", block)
         if mode == "G1":
+            start = list(self.tool_pos)
             length = math.dist(start, target)
             if length < 1e-9:
                 return
@@ -686,6 +800,13 @@ class Interpreter:
         except ArcError as exc:
             self.diag("error", "ARC_INVALID", f"{exc}. Verification stopped.", block, halt=True)
             return
+        if self.comp.active:
+            if plane != "G17":
+                self.diag("error", "COMP_PLANE", "Arc outside the XY plane with cutter compensation active is not supported. Verification stopped.", block, halt=True)
+            el = Element("arc", "arc", start, target, block, feed, center=center, cw=clockwise)
+            self._comp_safe(block, self.comp.add, el, self.tool_pos[:2])
+            st.pos = target
+            return
         self._emit(
             "arc",
             "mill",
@@ -709,15 +830,18 @@ class Interpreter:
             seconds = w.value if w.has_decimal_point or self.settings.decimal_mode == "calculator" else w.value / 1000.0
         else:
             seconds = 0.0
-        self._emit("dwell", "none", block, st.pos, st.pos, seconds, 0.0, st, note=f"Dwell {seconds:g} s")
+        self._comp_safe(block, self.comp.flush)
+        self._emit("dwell", "none", block, self.tool_pos, self.tool_pos, seconds, 0.0, st, note=f"Dwell {seconds:g} s")
 
     def _stops(self, block, st, groups):
         code = groups.get("stop")
         if not code:
             return
         if code in ("M0", "M1"):
-            self._emit("stop", "none", block, st.pos, st.pos, 0.0, 0.0, st, note="Program stop" if code == "M0" else "Optional stop")
+            self._comp_safe(block, self.comp.flush)
+            self._emit("stop", "none", block, self.tool_pos, self.tool_pos, 0.0, 0.0, st, note="Program stop" if code == "M0" else "Optional stop")
         else:
+            self._comp_safe(block, self.comp.cancel)
             st.ended = True
             if st.spindle_dir != 0:
                 st.spindle_dir = 0
@@ -729,6 +853,7 @@ class Interpreter:
             self.diag("error", "M6_NO_T", "M06 without a T number selected. Verification stopped.", block, halt=True)
         if st.cutter_comp != "G40":
             self.diag("warning", "M6_COMP", "Tool change with cutter compensation active.", block)
+            self._comp_safe(block, self.comp.flush)
         if st.cycle:
             self.diag("warning", "M6_CYCLE", "Tool change with a canned cycle still active (no G80).", block)
         prev = st.tool
@@ -875,7 +1000,7 @@ class Interpreter:
             self._rapid(block, st, ret_pt, op=op)
 
     def _feed_to(self, block, st, target, feed, op, note=None):
-        start = list(st.pos)
+        start = list(self.tool_pos)
         length = math.dist(start, target)
         if length < 1e-9:
             return
@@ -887,7 +1012,7 @@ class Interpreter:
         if code in ("G81", "G82"):
             self._feed_to(block, st, at(bottom), feed, op)
             if code == "G82" and st.cycle_p:
-                self._emit("dwell", op, block, st.pos, st.pos, st.cycle_p, 0.0, st, note=f"Dwell {st.cycle_p:g} s")
+                self._emit("dwell", op, block, self.tool_pos, self.tool_pos, st.cycle_p, 0.0, st, note=f"Dwell {st.cycle_p:g} s")
         elif code in ("G73", "G83"):
             q = st.cycle_q
             d = self.dialect.peck_clearance_mm
@@ -906,17 +1031,17 @@ class Interpreter:
         elif code in ("G84", "G74"):
             self._feed_to(block, st, at(bottom), feed, op, note="tap in")
             if st.cycle_p:
-                self._emit("dwell", op, block, st.pos, st.pos, st.cycle_p, 0.0, st)
+                self._emit("dwell", op, block, self.tool_pos, self.tool_pos, st.cycle_p, 0.0, st)
             self._feed_to(block, st, at(r_level), feed, op, note="tap out (spindle reversed)")
         elif code in ("G85", "G89"):
             self._feed_to(block, st, at(bottom), feed, op)
             if code == "G89" and st.cycle_p:
-                self._emit("dwell", op, block, st.pos, st.pos, st.cycle_p, 0.0, st)
+                self._emit("dwell", op, block, self.tool_pos, self.tool_pos, st.cycle_p, 0.0, st)
             self._feed_to(block, st, at(r_level), feed, op, note="feed out")
         elif code in ("G86", "G76", "G88"):
             self._feed_to(block, st, at(bottom), feed, op)
             if code == "G88" and st.cycle_p:
-                self._emit("dwell", op, block, st.pos, st.pos, st.cycle_p, 0.0, st)
+                self._emit("dwell", op, block, self.tool_pos, self.tool_pos, st.cycle_p, 0.0, st)
         else:  # pragma: no cover - guarded by dialect table
             self.diag("error", "UNSUPPORTED_CODE", f"{code} not implemented.", block, halt=True)
 
@@ -1005,8 +1130,11 @@ class Interpreter:
             "Tool, holder, vice and fixture geometry are not modelled yet (Phase 3).",
             "Machine travel limits and collisions are not checked yet (Phase 4).",
         ]
-        if any(d.code == "CUTTER_COMP" for d in self.diags):
-            limitations.append("Cutter radius compensation (G41/G42) is shown as the programmed path, not the offset cutter centre.")
+        if self._comp_used:
+            if self.settings.cutter_comp_mode == "zero":
+                limitations.append("G41/G42 simulated with D = 0 (wear only): the program path is treated as the cutter centre.")
+            else:
+                limitations.append("G41/G42 simulated with D = tool radius, FANUC type A start-up and intersection corners; check that the machine's D values match.")
         if self.settings.rapid_mode == "linear":
             limitations.append("Rapid moves are drawn as straight lines; set rapid mode to dog-leg if the machine uses non-interpolated rapids.")
 

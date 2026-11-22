@@ -210,6 +210,20 @@ function SummaryView({ result }: { result: InterpretResponse }) {
             </div>
           </div>
         )}
+        {s.stock && (
+          <div className="extent">
+            <div className="kpi-label">Material removal ({s.stock.material || "stock"})</div>
+            <div className="mono">
+              Removed {(s.stock.removed_volume / 1000).toFixed(1)} cm³ of {(s.stock.initial_volume / 1000).toFixed(1)} cm³
+              <br />
+              Air cutting {s.stock.air_cutting_percent}% ({fmtTime(s.stock.time_air_cutting)})
+              <br />
+              Deepest point Z {s.stock.lowest_point.toFixed(3)}
+              <br />
+              {s.stock.removed_by_tool.map((t) => `T${t.tool ?? "?"} ${(t.volume / 1000).toFixed(1)} cm³`).join(" · ")}
+            </div>
+          </div>
+        )}
         <div className="limits">
           <div className="kpi-label">Not yet verified</div>
           <ul>

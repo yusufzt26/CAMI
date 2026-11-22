@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from ..config import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES
 from ..db import Program, get_session
-from ..gcode import InterpreterSettings, interpret
+from ..gcode import InterpreterSettings
+from ..material_removal import StockSetup
+from ..verification import verify
 from ..gcode.controllers import available_dialects, get_dialect
 from ..schemas import ProgramDetail, ProgramOut, SetupIn
 
@@ -87,18 +89,19 @@ def delete_program(program_id: int, db: Session = Depends(get_session)):
 @router.post("/programs/{program_id}/interpret")
 def interpret_program(program_id: int, setup: SetupIn, db: Session = Depends(get_session)):
     prog = _get(db, program_id)
+    data = setup.model_dump()
+    stock = data.pop("stock")
+    tools = {k: {kk: vv for kk, vv in v.items() if vv is not None} for k, v in data.pop("tools").items()}
     try:
-        settings = InterpreterSettings(**setup.model_dump())
-        result = interpret(prog.content, settings)
+        settings = InterpreterSettings(**data)
+        result = verify(
+            prog.content,
+            settings,
+            StockSetup(tuple(stock["size"]), stock["origin"], stock["top_z"], stock["allowance"], stock["material"]),
+            tools,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    prog.last_status = result.summary["status"]
+    prog.last_status = result["summary"]["status"]
     db.commit()
-    return {
-        "program": {"id": prog.id, "filename": prog.filename},
-        "blocks": result.blocks,
-        "moves": result.moves,
-        "diagnostics": result.diagnostics,
-        "summary": result.summary,
-        "settings": result.settings,
-    }
+    return {"program": {"id": prog.id, "filename": prog.filename}, **result}
