@@ -53,7 +53,7 @@ backend/app/
 frontend/src/
   sim/timeline.ts     time -> machine state (kinematics only)
   viewer/SceneView.ts Three.js scene, independent of React
-  components/         dark industrial UI: job setup (left), verification/tools/machine (right),
+  components/         light industrial UI: job setup (left), verification/tools/machine (right),
                       G-code blocks / diagnostics / summary (bottom)
 ```
 
