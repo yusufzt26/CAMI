@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LOCAL_MODE, clearPrograms, getProgramText, interpretProgram, listPrograms, uploadProgram, type JobSetup } from "./api";
 import { type ProgramSetInfo, SetRunner } from "./setRunner";
-import { runInBrowser } from "./engineRun";
+import { browserSettings, runInBrowser } from "./engineRun";
 import { OptimiserView } from "./optimiser/OptimiserView";
 import { LEVELS } from "./optimiser/analysis";
 import { BottomPanel } from "./components/BottomPanel";
@@ -326,6 +326,8 @@ export default function App() {
       />
       <div className="opt-pane" hidden={view !== "opt"}>
         <OptimiserView
+          getText={() => (current ? getProgramText(current.id) : Promise.reject(new Error("No program open.")))}
+          interpSettings={() => browserSettings(appliedJob)}
           result={optResult}
           timeline={optTimeline}
           busy={optBusy ?? busy}

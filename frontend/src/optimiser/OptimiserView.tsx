@@ -3,6 +3,8 @@ import type { Timeline } from "../sim/timeline";
 import type { InterpretResponse, ToolInfo } from "../types";
 import { fmtTime } from "../components/format";
 import { type Analysis, LEVELS, METRICS, type Metric, analyse, defaultFlutes } from "./analysis";
+import { FeedPanel } from "./FeedPanel";
+import type { InterpreterSettings } from "../engine/interpreter";
 
 interface Props {
   result: InterpretResponse | null;
@@ -12,11 +14,13 @@ interface Props {
   loadColors: boolean;
   onLoadColors: (on: boolean, analysis: Analysis | null) => void;
   onShowInSimulator: (moveIndex: number) => void;
+  getText: () => Promise<string>;
+  interpSettings: () => InterpreterSettings;
 }
 
 const TYPE_LABEL: Record<string, string> = { flat: "Flat end mill", ball: "Ball nose", bull: "Bull nose", face: "Face mill", drill: "Drill", spot: "Spot drill", reamer: "Reamer", tap: "Tap", counterbore: "Counterbore" };
 
-export function OptimiserView({ result, timeline, busy, error, loadColors, onLoadColors, onShowInSimulator }: Props) {
+export function OptimiserView({ result, timeline, busy, error, loadColors, onLoadColors, onShowInSimulator, getText, interpSettings }: Props) {
   const [metric, setMetric] = useState<Metric>("mrr");
   const [flutes, setFlutes] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<number | null>(null);
@@ -66,7 +70,7 @@ export function OptimiserView({ result, timeline, busy, error, loadColors, onLoa
     <div className="opt">
       <section className="opt-head card">
         <div className="opt-title">
-          <div className="opt-kicker">Cutting load analysis · phase 1</div>
+          <div className="opt-kicker">Cutting load analysis</div>
           <h2 className="mono">{result.program.filename}</h2>
           <div className="muted">
             {result.startStock ? "Stock carried over from the earlier programs of the set" : "Starting from the raw stock block"} · grid {Math.max(result.stock.grid.cx, result.stock.grid.cy).toFixed(2)} mm ·
@@ -133,6 +137,18 @@ export function OptimiserView({ result, timeline, busy, error, loadColors, onLoa
         {selected !== null && <MoveDetail i={selected} result={result} analysis={analysis} onShow={() => onShowInSimulator(selected)} />}
       </section>
 
+      <FeedPanel
+        result={result}
+        analysis={analysis}
+        timeline={timeline}
+        getText={getText}
+        settings={interpSettings}
+        onSelect={(i) => {
+          setSelected(i);
+          document.querySelector(".opt-chart")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+      />
+
       <section className="opt-grid">
         <Heaviest result={result} analysis={analysis} metric={metric} onSelect={setSelected} selected={selected} />
         <div className="card opt-notes">
@@ -148,7 +164,7 @@ export function OptimiserView({ result, timeline, busy, error, loadColors, onLoa
               <b>Chip thickness</b> uses F ÷ (S × flutes), thinned for engagement under 90°. Set the real flute or insert count above.
             </li>
             <li>The stock model has a {Math.max(result.stock.grid.cx, result.stock.grid.cy).toFixed(2)} mm grid, so engagement on short finishing moves is an average, not an exact value.</li>
-            <li>Phase 2 adds load-based feed optimisation and writes the optimised NC file. Positions are never changed.</li>
+            <li>Feed optimisation changes F words only. Positions, arcs, tools and spindle speeds are never changed, and the result is checked by interpreting it again.</li>
           </ul>
         </div>
       </section>

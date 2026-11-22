@@ -20,6 +20,8 @@ export interface MoveLoad {
   ap: Float32Array;
   /** Raw radial width of cut for this move alone, mm (removed / (XY length × ap)); noisy for moves shorter than the grid. */
   ae: Float32Array;
+  /** Smallest gap between tool and stock during the move, mm (negative = cutting; Infinity = nowhere near the stock). */
+  gap: Float32Array;
   /** XY travel, mm. */
   lxy: Float32Array;
   /** 1 = entry into material steeper than 45 degrees (plunge or steep ramp). */
@@ -79,7 +81,7 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     if (n <= MAX_PER_CODE) diags.push({ severity, code, message, line: m.line, block: m.block, halt: false });
   };
   const n = moves.length;
-  const load: MoveLoad = { removed: new Float32Array(n), ap: new Float32Array(n), ae: new Float32Array(n), lxy: new Float32Array(n), plunge: new Uint8Array(n) };
+  const load: MoveLoad = { removed: new Float32Array(n), ap: new Float32Array(n), ae: new Float32Array(n), lxy: new Float32Array(n), gap: new Float32Array(n).fill(Infinity), plunge: new Uint8Array(n) };
   const removedByTool = new Map<number | null, number>();
   let timeIn = 0;
   let timeAir = 0;
@@ -104,18 +106,21 @@ function simulate(moves: Move[], stock: StockSetup, tools: Map<number | null, To
     let below = false;
     let ap = 0;
     let lxy = 0;
+    let gap = Infinity;
     for (let i = 0; i < pts.length - 1; i++) {
       zm.applySegment(pts[i], pts[i + 1], tool, toolId);
       removed += zm.lastRemoved;
       cells += zm.lastCells;
       below = below || zm.lastBelow;
       if (zm.lastMaxDepth > ap) ap = zm.lastMaxDepth;
+      if (zm.lastGap < gap) gap = zm.lastGap;
       lxy += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
     }
     // Engagement: ap = deepest cut, ae = removed cross-section / ap (plunges count as full width).
     load.removed[mi] = removed;
     load.ap[mi] = ap;
     load.lxy[mi] = lxy;
+    load.gap[mi] = gap;
     if (removed > 0 && ap > 0) {
       const D = tool.R * 2;
       const dz = m.end[2] - m.start[2];
